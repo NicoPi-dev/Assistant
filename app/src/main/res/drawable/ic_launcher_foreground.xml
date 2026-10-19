@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Logo « Orbe » : orbe terre cuite avec une onde vocale -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Halo -->
+    <path android:pathData="M10,54a44,44 0,1 0,88 0a44,44 0,1 0,-88 0z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="54" android:centerY="54"
+                android:gradientRadius="44">
+                <item android:offset="0.45" android:color="#73D97757" />
+                <item android:offset="1" android:color="#00D97757" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Orbe -->
+    <path android:pathData="M25,54a29,29 0,1 0,58 0a29,29 0,1 0,-58 0z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="47" android:centerY="44.7"
+                android:gradientRadius="40.6">
+                <item android:offset="0" android:color="#FFF2A585" />
+                <item android:offset="0.55" android:color="#FFD97757" />
+                <item android:offset="1" android:color="#FF9E4A30" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Reflet -->
+    <group android:pivotX="44.7" android:pivotY="42.2" android:rotation="-28">
+        <path
+            android:fillColor="#47FFFFFF"
+            android:pathData="M32.5,42.2a12.2,7.6 0,1 0,24.4 0a12.2,7.6 0,1 0,-24.4 0z" />
+    </group>
+
+    <!-- Onde vocale -->
+    <path
+        android:strokeColor="#FFFFF6F0"
+        android:strokeWidth="3.4"
+        android:strokeLineCap="round"
+        android:pathData="M41.3,49.8V58.2M49.8,44.3V63.7M58.2,40.1V67.9M66.6,46.8V61.2" />
+</vector>
