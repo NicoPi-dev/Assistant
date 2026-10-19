@@ -41,6 +41,10 @@ object ClaudeClient {
         Tes réponses sont lues à voix haute : une ou deux phrases courtes, chiffres arrondis,
         unités en toutes lettres (watts, kilowattheures, degrés), jamais d'identifiant technique.
         Pour les portes et fenêtres, "on" signifie ouvert et "off" fermé.
+        LUMIÈRES : utilise l'outil lumiere avec les identifiants de la liste « Lumières pilotables ».
+        « Éteins tout » = toutes les lumières de la liste. Confirme en une phrase courte.
+        LISTE DE COURSES : outil liste_courses. Un article par élément, formulé simplement
+        (« lait », « pain de mie »). « J'ai acheté le lait » ou « enlève le lait » = retirer.
         MÉTÉO À VENIR : pour demain, ce week-end, la semaine, utilise meteo_previsions (type jour) ;
         pour cet après-midi, ce soir, les prochaines heures : type heure. Donne le temps, les
         températures mini et maxi, et la pluie si elle est notable. Météo actuelle : lire_maison.
@@ -269,6 +273,35 @@ object ClaudeClient {
         if (HomeAssistant.configure) {
             base.put(JSONObject("""
                 {
+                  "name": "lumiere",
+                  "description": "Allume ou éteint des lumières de la maison (uniquement celles de la liste « Lumières pilotables »), ou donne leur état.",
+                  "input_schema": {
+                    "type": "object",
+                    "properties": {
+                      "entity_ids": { "type": "array", "items": { "type": "string" } },
+                      "action": { "type": "string", "enum": ["allumer", "eteindre", "etat"] },
+                      "luminosite": { "type": "integer", "description": "1 à 100 %, optionnel, seulement pour les lampes réglables" }
+                    },
+                    "required": ["entity_ids", "action"]
+                  }
+                }
+            """))
+            base.put(JSONObject("""
+                {
+                  "name": "liste_courses",
+                  "description": "Liste de courses de la maison : lire, ajouter ou retirer (cocher) des articles.",
+                  "input_schema": {
+                    "type": "object",
+                    "properties": {
+                      "action": { "type": "string", "enum": ["lire", "ajouter", "retirer"] },
+                      "articles": { "type": "array", "items": { "type": "string" } }
+                    },
+                    "required": ["action"]
+                  }
+                }
+            """))
+            base.put(JSONObject("""
+                {
                   "name": "meteo_previsions",
                   "description": "Prévisions Météo-France pour le lieu de la maison : jour par jour (une dizaine de jours) ou heure par heure (prochaines 24 h).",
                   "input_schema": {
@@ -326,7 +359,7 @@ object ClaudeClient {
 
     private fun system(context: Context): String =
         "Nous sommes le ${Agenda.maintenant()} (heure de Paris).\n\n" + if (HomeAssistant.configure)
-            SYSTEM_BASE + "\n\nCapteurs de la maison disponibles :\n" + HomeAssistant.catalogue(context)
+            SYSTEM_BASE + "\n\nCapteurs de la maison disponibles :\n" + HomeAssistant.catalogue(context) + Maison.extraSysteme(context)
         else SYSTEM_BASE
 
     /** Appel réseau : à lancer hors du thread principal (Dispatchers.IO). */
@@ -451,6 +484,27 @@ object ClaudeClient {
                                         .put("type", "tool_result")
                                         .put("tool_use_id", bloc.getString("id"))
                                         .put("content", "<mails_non_fiables>\n$texte\n</mails_non_fiables>")
+                                )
+                            }
+                            "lumiere", "liste_courses" -> {
+                                fun liste(cle: String): List<String> {
+                                    val a = input.optJSONArray(cle) ?: return emptyList()
+                                    return (0 until a.length()).map { a.getString(it) }
+                                }
+                                val texte = if (bloc.getString("name") == "lumiere") {
+                                    val action = input.optString("action", "etat")
+                                    if (mailsLus && action != "etat")
+                                        "Refusé par sécurité : pas de commande de lumière juste après la lecture de mails ou de l'agenda."
+                                    else Maison.lumiere(
+                                        context, liste("entity_ids"), action,
+                                        if (input.has("luminosite")) input.optInt("luminosite") else null
+                                    )
+                                } else Maison.courses(context, input.optString("action", "lire"), liste("articles"))
+                                resultats.put(
+                                    JSONObject()
+                                        .put("type", "tool_result")
+                                        .put("tool_use_id", bloc.getString("id"))
+                                        .put("content", texte)
                                 )
                             }
                             "meteo_previsions" -> {
