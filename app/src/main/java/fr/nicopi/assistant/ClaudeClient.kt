@@ -16,6 +16,8 @@ sealed class Intention {
     data class Minuteur(val secondes: Int, val libelle: String) : Intention()
     data class Rappel(val quand: java.time.LocalDateTime, val texte: String) : Intention()
     data class Naviguer(val destination: String, val mode: String) : Intention()
+    data class Jouer(val requete: String, val type: String, val artiste: String) : Intention()
+    data class Telecommande(val action: String) : Intention()
     /** externes = la réponse s'appuie sur des mails ou l'agenda (contenu non fiable). */
     data class Reponse(val texte: String, val externes: Boolean = false) : Intention()
 }
@@ -123,6 +125,34 @@ object ClaudeClient {
                   "jours": { "type": "array", "items": { "type": "integer" }, "description": "Répétition : 1=dimanche, 2=lundi … 7=samedi (optionnel)" }
                 },
                 "required": ["heure", "minute"]
+              }
+            }
+        """))
+        base.put(JSONObject("""
+            {
+              "name": "musique_jouer",
+              "description": "Joue de la musique sur Spotify : un titre, un artiste, un album ou une playlist.",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "requete": { "type": "string", "description": "Titre, nom d'artiste, d'album ou de playlist" },
+                  "type": { "type": "string", "enum": ["titre", "artiste", "album", "playlist"] },
+                  "artiste": { "type": "string", "description": "Artiste, si connu, pour un titre ou un album (optionnel)" }
+                },
+                "required": ["requete", "type"]
+              }
+            }
+        """))
+        base.put(JSONObject("""
+            {
+              "name": "musique_controle",
+              "description": "Télécommande de la musique en cours : pause, reprise, morceau suivant ou précédent, volume.",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "action": { "type": "string", "enum": ["pause", "lecture", "suivant", "precedent", "volume_plus", "volume_moins"] }
+                },
+                "required": ["action"]
               }
             }
         """))
@@ -343,6 +373,12 @@ object ClaudeClient {
                                 input.getString("destination"),
                                 input.optString("mode", "voiture")
                             )
+                            "musique_jouer" -> return Intention.Jouer(
+                                input.getString("requete"),
+                                input.optString("type", "titre"),
+                                input.optString("artiste")
+                            )
+                            "musique_controle" -> return Intention.Telecommande(input.getString("action"))
                             "minuteur" -> return Intention.Minuteur(
                                 input.getInt("secondes").coerceIn(1, 24 * 3600),
                                 input.optString("libelle")

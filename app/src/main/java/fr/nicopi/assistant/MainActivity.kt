@@ -348,6 +348,26 @@ class MainActivity : ComponentActivity() {
                 parler("C'est parti pour ${intention.destination}.")
                 Horloge.naviguer(this, intention.destination, intention.mode)
             }
+            is Intention.Jouer -> {
+                try {
+                    Musique.jouer(this, intention.requete, intention.type, intention.artiste)
+                    statut = "♪ " + intention.requete +
+                        (if (intention.artiste.isNotBlank()) " — ${intention.artiste}" else "")
+                } catch (e: Exception) {
+                    parler(e.message ?: "Impossible de lancer Spotify")
+                }
+            }
+            is Intention.Telecommande -> {
+                Musique.controler(this, intention.action)
+                statut = when (intention.action) {
+                    "pause" -> "Musique en pause"
+                    "lecture" -> "Lecture reprise"
+                    "suivant" -> "Morceau suivant"
+                    "precedent" -> "Morceau précédent"
+                    "volume_plus" -> "Volume augmenté"
+                    else -> "Volume baissé"
+                }
+            }
             is Intention.Minuteur -> {
                 Horloge.minuteur(this, intention.secondes, intention.libelle)
                 parler("Minuteur de ${Horloge.duree(intention.secondes)} lancé.")
