@@ -56,6 +56,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.first
 import kotlin.math.ceil
 import java.util.Locale
+import java.text.Normalizer
 
 class MainActivity : ComponentActivity() {
 
@@ -86,6 +87,9 @@ class MainActivity : ComponentActivity() {
     private var phraseCourante = ""
     private var derniereReponse = ""
     private var ecouteSuite = false
+    /** On attend un « oui » / « non » pour la carte affichée (rendez-vous, mail, SMS). */
+    private var ecouteConfirmation = false
+    private var relanceConfirmation = 0
     /** Où la musique a été lancée en dernier (pour « pause », « suivant » sans précision). */
     private var dernierOu = "telephone"
     private var visible = false
@@ -122,6 +126,16 @@ class MainActivity : ComponentActivity() {
             override fun onStart(id: String?) {}
             override fun onDone(id: String?) {
                 if (id == "sms") runOnUiThread { lectureFinie = true }
+                // Carte à valider : on écoute la réponse « oui » / « non »
+                if (id == "confirmer" || id == "sms") runOnUiThread {
+                    if (visible && !ecoute &&
+                        (smsEnAttente != null || mailEnAttente != null || evenementEnAttente != null)
+                    ) {
+                        ecouteConfirmation = true
+                        relanceConfirmation = 0
+                        ecouter()
+                    }
+                }
                 // Conversation continue : après une réponse, on réécoute quelques secondes
                 if (id == "suite") runOnUiThread {
                     if (visible && !ecoute && smsEnAttente == null && mailEnAttente == null && evenementEnAttente == null) {
@@ -208,6 +222,7 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         visible = false
         ecouteSuite = false
+        ecouteConfirmation = false
         super.onStop()
         reconnaissance.cancel()
         ecoute = false
@@ -239,6 +254,11 @@ class MainActivity : ComponentActivity() {
             val phrase = results
                 ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 ?.firstOrNull()
+            if (ecouteConfirmation) {
+                ecouteConfirmation = false
+                repondreConfirmation(phrase.orEmpty())
+                return
+            }
             if (phrase.isNullOrBlank()) {
                 reflexion = false
                 statut = "Je n'ai rien entendu"
@@ -249,6 +269,22 @@ class MainActivity : ComponentActivity() {
         }
 
         override fun onError(error: Int) {
+            if (ecouteConfirmation) {
+                // Pas de réponse : une relance pour un rendez-vous ou un mail, puis les boutons.
+                // Pour un SMS, le compte à rebours continue tout seul.
+                ecoute = false
+                reflexion = false
+                niveauMicro = 0f
+                val carte = mailEnAttente != null || evenementEnAttente != null
+                if (carte && relanceConfirmation < 1 && visible) {
+                    relanceConfirmation++
+                    ecouter()
+                    return
+                }
+                ecouteConfirmation = false
+                if (carte) statut = "Touche « Ajouter » / « Envoyer » ou « Annuler »"
+                return
+            }
             if (ecouteSuite) {
                 // Silence après une réponse : on s'arrête sans message d'erreur
                 ecouteSuite = false
@@ -339,7 +375,7 @@ class MainActivity : ComponentActivity() {
             is Intention.EnvoyerMail -> {
                 val b = intention.brouillon
                 mailEnAttente = b
-                parler("Mail pour ${b.nomAffiche} prêt. Vérifie-le avant l'envoi.")
+                parler("Mail pour ${b.nomAffiche} prêt. Vérifie-le, puis dis oui pour l'envoyer.", "confirmer")
             }
             is Intention.Alarme -> {
                 Horloge.alarme(this, intention.heure, intention.minute, intention.libelle, intention.jours)
@@ -411,7 +447,7 @@ class MainActivity : ComponentActivity() {
             is Intention.AjouterEvenement -> {
                 val e = intention.brouillon
                 evenementEnAttente = e
-                parler("${e.titre}, ${e.resume()}. Je l'ajoute ?")
+                parler("${e.titre}, ${e.resume()}. Je l'ajoute ?", "confirmer")
             }
             is Intention.Reponse -> {
                 historique += phraseCourante to intention.texte
@@ -421,6 +457,42 @@ class MainActivity : ComponentActivity() {
                 derniereReponse = intention.texte
                 parler(intention.texte, "suite")
             }
+        }
+    }
+
+    /** Oui = true, non = false, pas compris = null. En cas de doute, on ne valide pas. */
+    private fun reponseOuiNon(phrase: String): Boolean? {
+        val p = " " + Normalizer.normalize(phrase.lowercase(), Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}"), "")
+            .replace(Regex("[^a-z0-9]+"), " ") + " "
+        val non = listOf("non", "annule", "annuler", "annulez", "stop", "pas", "laisse tomber", "arrete", "attends", "efface")
+        val oui = listOf(
+            "oui", "ouais", "ajoute", "ajouter", "envoie", "envoyer", "envoi", "vas y", "valide", "valider",
+            "confirme", "ok", "okay", "d accord", "c est bon", "parfait", "go", "yes", "ca marche", "exactement"
+        )
+        if (non.any { p.contains(" $it ") }) return false
+        if (oui.any { p.contains(" $it ") }) return true
+        return null
+    }
+
+    private fun repondreConfirmation(phrase: String) {
+        reflexion = false
+        niveauMicro = 0f
+        when (reponseOuiNon(phrase)) {
+            true -> when {
+                evenementEnAttente != null -> ajouterEvenementEnAttente()
+                mailEnAttente != null -> envoyerMailEnAttente()
+                smsEnAttente != null -> envoyerSmsEnAttente()
+            }
+            false -> {
+                if (smsEnAttente != null || mailEnAttente != null || evenementEnAttente != null) {
+                    smsEnAttente = null
+                    mailEnAttente = null
+                    evenementEnAttente = null
+                    parler("Annulé")
+                }
+            }
+            null -> if (smsEnAttente == null) statut = "Je n'ai pas compris : touche un bouton"
         }
     }
 
@@ -541,7 +613,7 @@ class MainActivity : ComponentActivity() {
                 Spacer(Modifier.height(if (carte) 12.dp else 28.dp))
 
                 val texte = if (m == Mode.CONFIRMATION && smsEnAttente != null) "Envoi automatique…"
-                    else if (m == Mode.CONFIRMATION && evenementEnAttente != null) "À ajouter ?"
+                    else if (m == Mode.CONFIRMATION && evenementEnAttente != null) "À ajouter ? Dis « oui » ou « non »"
                     else if (m == Mode.CONFIRMATION) "À vérifier avant l'envoi"
                     else statut
                 AnimatedContent(
