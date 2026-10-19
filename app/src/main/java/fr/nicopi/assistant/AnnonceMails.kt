@@ -43,8 +43,12 @@ class AnnonceMails : NotificationListenerService() {
         dejaAnnonces.addLast(id)
         if (dejaAnnonces.size > 50) dejaAnnonces.removeFirst()
 
-        val de = n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.take(60) ?: return
+        val titre = n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.take(60) ?: return
         val sujet = n.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.take(120).orEmpty()
+        // Les mails envoyés depuis ta propre adresse (alertes de NicoPi) arrivent avec « moi »
+        val de = if (titre.equals("moi", true) || titre.equals("me", true)) {
+            if (sujet.contains("NicoPi", true)) "NicoPi" else "toi-même"
+        } else titre
         if (pret) {
             tts?.speak("Nouveau mail de $de. $sujet", TextToSpeech.QUEUE_ADD, null, sbn.key)
         }
