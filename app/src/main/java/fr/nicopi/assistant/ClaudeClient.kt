@@ -41,6 +41,8 @@ object ClaudeClient {
         Tes réponses sont lues à voix haute : une ou deux phrases courtes, chiffres arrondis,
         unités en toutes lettres (watts, kilowattheures, degrés), jamais d'identifiant technique.
         Pour les portes et fenêtres, "on" signifie ouvert et "off" fermé.
+        PRÉSENCE : pour « est-ce que [prenom] est à la maison ? », « qui est là ? », lis les capteurs du groupe
+        Présence. "home" = à la maison, "not_home" = absent(e), un autre nom = la zone où se trouve la personne.
         Pour les mails, utilise gmail_chercher (syntaxe de recherche Gmail : is:unread, from:,
         newer_than:2d, subject:…), puis gmail_lire pour le contenu complet si besoin.
         Pour résumer des mails : qui, quoi, et ce qui est attendu de $PRENOM, en quelques phrases.
