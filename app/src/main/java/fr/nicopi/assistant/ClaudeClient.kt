@@ -41,6 +41,9 @@ object ClaudeClient {
         Tes réponses sont lues à voix haute : une ou deux phrases courtes, chiffres arrondis,
         unités en toutes lettres (watts, kilowattheures, degrés), jamais d'identifiant technique.
         Pour les portes et fenêtres, "on" signifie ouvert et "off" fermé.
+        MÉTÉO À VENIR : pour demain, ce week-end, la semaine, utilise meteo_previsions (type jour) ;
+        pour cet après-midi, ce soir, les prochaines heures : type heure. Donne le temps, les
+        températures mini et maxi, et la pluie si elle est notable. Météo actuelle : lire_maison.
         PRÉSENCE : pour « est-ce que [prenom] est à la maison ? », « qui est là ? », lis les capteurs du groupe
         Présence. "home" = à la maison, "not_home" = absent(e), un autre nom = la zone où se trouve la personne.
         Pour les mails, utilise gmail_chercher (syntaxe de recherche Gmail : is:unread, from:,
@@ -264,6 +267,19 @@ object ClaudeClient {
             }
         """))
         if (HomeAssistant.configure) {
+            base.put(JSONObject("""
+                {
+                  "name": "meteo_previsions",
+                  "description": "Prévisions Météo-France pour le lieu de la maison : jour par jour (une dizaine de jours) ou heure par heure (prochaines 24 h).",
+                  "input_schema": {
+                    "type": "object",
+                    "properties": {
+                      "type": { "type": "string", "enum": ["jour", "heure"] }
+                    },
+                    "required": ["type"]
+                  }
+                }
+            """))
             base.put(
                 JSONObject(
                     """
@@ -435,6 +451,14 @@ object ClaudeClient {
                                         .put("type", "tool_result")
                                         .put("tool_use_id", bloc.getString("id"))
                                         .put("content", "<mails_non_fiables>\n$texte\n</mails_non_fiables>")
+                                )
+                            }
+                            "meteo_previsions" -> {
+                                resultats.put(
+                                    JSONObject()
+                                        .put("type", "tool_result")
+                                        .put("tool_use_id", bloc.getString("id"))
+                                        .put("content", HomeAssistant.previsions(context, input.optString("type", "jour")))
                                 )
                             }
                             "historique_maison" -> {

@@ -87,6 +87,64 @@ object HomeAssistant {
      * la consommation d'une journée est sa valeur maximale ce jour-là ; pour un compteur
      * qui ne fait qu'augmenter (index), c'est la différence dernière − première valeur.
      */
+    private val CONDITIONS = mapOf(
+        "clear-night" to "nuit dégagée", "cloudy" to "couvert", "exceptional" to "exceptionnel",
+        "fog" to "brouillard", "hail" to "grêle", "lightning" to "orages", "lightning-rainy" to "orages et pluie",
+        "partlycloudy" to "éclaircies", "pouring" to "fortes pluies", "rainy" to "pluie", "snowy" to "neige",
+        "snowy-rainy" to "pluie et neige", "sunny" to "ensoleillé", "windy" to "venteux", "windy-variant" to "venteux et nuageux"
+    )
+
+    /**
+     * Prévisions de la première entité météo de la liste blanche (Météo-France).
+     * type : "jour" (quotidien) ou "heure" (horaire, 24 h). Appel réseau : hors thread principal.
+     */
+    fun previsions(context: Context, type: String): String {
+        val meteo = capteurs(context).firstOrNull { it.entityId.startsWith("weather.") }
+            ?: return "Aucune entité météo autorisée."
+        val horaire = type == "heure"
+        val url = BuildConfig.HA_URL.trimEnd('/') + "/api/services/weather/get_forecasts?return_response"
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            doOutput = true
+            connectTimeout = 8_000
+            readTimeout = 15_000
+            setRequestProperty("Authorization", "Bearer ${BuildConfig.HA_TOKEN}")
+            setRequestProperty("Content-Type", "application/json")
+        }
+        return try {
+            conn.outputStream.use {
+                it.write(
+                    JSONObject().put("entity_id", meteo.entityId)
+                        .put("type", if (horaire) "hourly" else "daily").toString().toByteArray()
+                )
+            }
+            if (conn.responseCode != 200) return "Prévisions : erreur Home Assistant ${conn.responseCode}"
+            val liste = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+                .getJSONObject("service_response").getJSONObject(meteo.entityId).getJSONArray("forecast")
+            val zone = java.time.ZoneId.systemDefault()
+            val fmt = java.time.format.DateTimeFormatter.ofPattern(
+                if (horaire) "EEEE HH'h'" else "EEEE d MMMM", java.util.Locale.FRANCE
+            )
+            val lignes = (0 until minOf(liste.length(), if (horaire) 24 else 10)).map { i ->
+                val f = liste.getJSONObject(i)
+                val quand = java.time.OffsetDateTime.parse(f.getString("datetime")).atZoneSameInstant(zone)
+                val jour = if (horaire) quand else quand.toLocalDate().atStartOfDay(zone)
+                val cond = f.optString("condition").let { CONDITIONS[it] ?: it }
+                val temp = if (horaire) "${f.opt("temperature")}°C"
+                else "mini ${f.opt("templow")}°C, maxi ${f.opt("temperature")}°C"
+                val pluie = f.optDouble("precipitation", 0.0).takeIf { it > 0 }?.let { ", pluie $it mm" }.orEmpty()
+                val proba = if (f.has("precipitation_probability")) ", risque de pluie ${f.opt("precipitation_probability")} %" else ""
+                val vent = if (f.has("wind_speed")) ", vent ${f.opt("wind_speed")} km/h" else ""
+                "${jour.format(fmt)} : $cond, $temp$pluie$proba$vent"
+            }
+            "Prévisions Météo-France (${if (horaire) "heure par heure" else "jour par jour"}) :\n" + lignes.joinToString("\n")
+        } catch (e: Exception) {
+            "Prévisions indisponibles (${e.message})"
+        } finally {
+            conn.disconnect()
+        }
+    }
+
     fun historique(
         context: Context,
         entityId: String,
