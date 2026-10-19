@@ -527,9 +527,18 @@ class MainActivity : ComponentActivity() {
             ) {
                 EnTete(m, c1)
 
+                // Carte de confirmation à l'écran : orbe réduite et bulle masquée,
+                // pour que les boutons restent toujours visibles.
+                val carte = smsEnAttente != null || mailEnAttente != null || evenementEnAttente != null
                 Spacer(Modifier.weight(1f))
-                Orbe(m, c1, c2)
-                Spacer(Modifier.height(28.dp))
+                if (carte) {
+                    Box(Modifier.size(130.dp), contentAlignment = Alignment.Center) {
+                        Box(Modifier.requiredSize(260.dp).scale(0.5f), contentAlignment = Alignment.Center) {
+                            Orbe(m, c1, c2)
+                        }
+                    }
+                } else Orbe(m, c1, c2)
+                Spacer(Modifier.height(if (carte) 12.dp else 28.dp))
 
                 val texte = if (m == Mode.CONFIRMATION && smsEnAttente != null) "Envoi automatique…"
                     else if (m == Mode.CONFIRMATION && evenementEnAttente != null) "À ajouter ?"
@@ -554,7 +563,7 @@ class MainActivity : ComponentActivity() {
                 Spacer(Modifier.weight(1f))
 
                 AnimatedVisibility(
-                    visible = entendu.isNotBlank(),
+                    visible = entendu.isNotBlank() && !carte,
                     enter = fadeIn() + slideInVertically { it / 2 },
                     exit = fadeOut()
                 ) { BulleUtilisateur(entendu) }
