@@ -33,6 +33,9 @@ android {
         buildConfigField("String", "PRENOM", "\"${localProps.getProperty("PRENOM", "")}\"")
         buildConfigField("String", "VILLE", "\"${localProps.getProperty("VILLE", "")}\"")
         buildConfigField("String", "FAVORIS", "\"${localProps.getProperty("FAVORIS", "")}\"")
+        buildConfigField("String", "SONOS", "\"${localProps.getProperty("SONOS", "")}\"")
+        buildConfigField("String", "SPOTIFY_ID", "\"${localProps.getProperty("SPOTIFY_ID", "")}\"")
+        buildConfigField("String", "SPOTIFY_SECRET", "\"${localProps.getProperty("SPOTIFY_SECRET", "")}\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

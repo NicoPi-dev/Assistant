@@ -86,6 +86,8 @@ class MainActivity : ComponentActivity() {
     private var phraseCourante = ""
     private var derniereReponse = ""
     private var ecouteSuite = false
+    /** Où la musique a été lancée en dernier (pour « pause », « suivant » sans précision). */
+    private var dernierOu = "telephone"
     private var visible = false
     private var lectureFinie by mutableStateOf(false)
 
@@ -348,7 +350,21 @@ class MainActivity : ComponentActivity() {
                 parler("C'est parti pour ${intention.destination}.")
                 Horloge.naviguer(this, intention.destination, intention.mode)
             }
-            is Intention.Jouer -> {
+            is Intention.Jouer -> if (intention.ou != "telephone") {
+                statut = "Je lance sur ${Sonos.libelle(intention.ou)}…"
+                lifecycleScope.launch {
+                    try {
+                        val titre = withContext(Dispatchers.IO) {
+                            Sonos.jouer(intention.requete, intention.type, intention.artiste, intention.ou)
+                        }
+                        dernierOu = intention.ou
+                        statut = "♪ $titre · ${Sonos.libelle(intention.ou)}"
+                    } catch (e: Exception) {
+                        parler(e.message ?: "Impossible de lancer la musique sur le Sonos")
+                    }
+                }
+            } else {
+                dernierOu = "telephone"
                 try {
                     Musique.jouer(this, intention.requete, intention.type, intention.artiste)
                     statut = "♪ " + intention.requete +
@@ -358,8 +374,16 @@ class MainActivity : ComponentActivity() {
                 }
             }
             is Intention.Telecommande -> {
-                Musique.controler(this, intention.action)
-                statut = when (intention.action) {
+                val ou = intention.ou.ifBlank { dernierOu }
+                if (ou == "telephone") Musique.controler(this, intention.action)
+                else lifecycleScope.launch {
+                    try {
+                        withContext(Dispatchers.IO) { Sonos.controler(intention.action, ou) }
+                    } catch (e: Exception) {
+                        parler(e.message ?: "Le Sonos ne répond pas")
+                    }
+                }
+                statut = (if (ou == "telephone") "" else Sonos.libelle(ou) + " : ") + when (intention.action) {
                     "pause" -> "Musique en pause"
                     "lecture" -> "Lecture reprise"
                     "suivant" -> "Morceau suivant"

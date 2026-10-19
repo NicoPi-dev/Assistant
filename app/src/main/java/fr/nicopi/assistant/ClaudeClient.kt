@@ -16,8 +16,8 @@ sealed class Intention {
     data class Minuteur(val secondes: Int, val libelle: String) : Intention()
     data class Rappel(val quand: java.time.LocalDateTime, val texte: String) : Intention()
     data class Naviguer(val destination: String, val mode: String) : Intention()
-    data class Jouer(val requete: String, val type: String, val artiste: String) : Intention()
-    data class Telecommande(val action: String) : Intention()
+    data class Jouer(val requete: String, val type: String, val artiste: String, val ou: String = "telephone") : Intention()
+    data class Telecommande(val action: String, val ou: String = "") : Intention()
     /** externes = la réponse s'appuie sur des mails ou l'agenda (contenu non fiable). */
     data class Reponse(val texte: String, val externes: Boolean = false) : Intention()
 }
@@ -65,6 +65,9 @@ object ClaudeClient {
         journée = sa valeur max ce jour-là. Index qui ne fait qu'augmenter : dernière − première.
         CONVERSATION : les échanges précédents sont fournis ; « et demain ? », « et lui ? »
         font référence à ce qui vient d'être dit.
+        MUSIQUE : musique_jouer et musique_controle ont un paramètre « ou ». « Sur le Sonos du bureau »,
+        « dans le séjour », « sur les deux Sonos », « partout », « dans toute la maison »… : l'enceinte voulue.
+        Sans précision pour jouer : telephone. Pour la télécommande sans précision, laisse « ou » vide.
         Si la demande ne correspond à aucun outil, réponds en une phrase courte.
     """.trimIndent()
 
@@ -137,7 +140,8 @@ object ClaudeClient {
                 "properties": {
                   "requete": { "type": "string", "description": "Titre, nom d'artiste, d'album ou de playlist" },
                   "type": { "type": "string", "enum": ["titre", "artiste", "album", "playlist"] },
-                  "artiste": { "type": "string", "description": "Artiste, si connu, pour un titre ou un album (optionnel)" }
+                  "artiste": { "type": "string", "description": "Artiste, si connu, pour un titre ou un album (optionnel)" },
+                  "ou": ${Sonos.schemaOu()}
                 },
                 "required": ["requete", "type"]
               }
@@ -150,7 +154,8 @@ object ClaudeClient {
               "input_schema": {
                 "type": "object",
                 "properties": {
-                  "action": { "type": "string", "enum": ["pause", "lecture", "suivant", "precedent", "volume_plus", "volume_moins"] }
+                  "action": { "type": "string", "enum": ["pause", "lecture", "suivant", "precedent", "volume_plus", "volume_moins"] },
+                  "ou": ${Sonos.schemaOu()}
                 },
                 "required": ["action"]
               }
@@ -376,9 +381,10 @@ object ClaudeClient {
                             "musique_jouer" -> return Intention.Jouer(
                                 input.getString("requete"),
                                 input.optString("type", "titre"),
-                                input.optString("artiste")
+                                input.optString("artiste"),
+                                input.optString("ou").ifBlank { "telephone" }
                             )
-                            "musique_controle" -> return Intention.Telecommande(input.getString("action"))
+                            "musique_controle" -> return Intention.Telecommande(input.getString("action"), input.optString("ou"))
                             "minuteur" -> return Intention.Minuteur(
                                 input.getInt("secondes").coerceIn(1, 24 * 3600),
                                 input.optString("libelle")
