@@ -78,6 +78,15 @@ class MainActivity : ComponentActivity() {
     private var ecoute by mutableStateOf(false)
     private var reflexion by mutableStateOf(false)
     private var niveauMicro by mutableFloatStateOf(0f)
+
+    // --- Conversation continue ---
+    private val historique = mutableListOf<Pair<String, String>>()
+    private var historiqueNonFiable = false
+    private var dernierEchange = 0L
+    private var phraseCourante = ""
+    private var derniereReponse = ""
+    private var ecouteSuite = false
+    private var visible = false
     private var lectureFinie by mutableStateOf(false)
 
     /** Délai avant l'envoi automatique d'un SMS, une fois le message lu à voix haute. */
@@ -109,7 +118,16 @@ class MainActivity : ComponentActivity() {
         tts = TextToSpeech(this) { if (it == TextToSpeech.SUCCESS) tts.language = Locale.FRANCE }
         tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(id: String?) {}
-            override fun onDone(id: String?) { if (id == "sms") runOnUiThread { lectureFinie = true } }
+            override fun onDone(id: String?) {
+                if (id == "sms") runOnUiThread { lectureFinie = true }
+                // Conversation continue : après une réponse, on réécoute quelques secondes
+                if (id == "suite") runOnUiThread {
+                    if (visible && !ecoute && smsEnAttente == null && mailEnAttente == null && evenementEnAttente == null) {
+                        ecouteSuite = true
+                        ecouter()
+                    }
+                }
+            }
             @Deprecated("Deprecated in Java")
             override fun onError(id: String?) { if (id == "sms") runOnUiThread { lectureFinie = true } }
         })
@@ -180,7 +198,14 @@ class MainActivity : ComponentActivity() {
     }
 
     /** L'app passe en arrière-plan : on se remet à guetter « Hey Claude ». */
+    override fun onStart() {
+        super.onStart()
+        visible = true
+    }
+
     override fun onStop() {
+        visible = false
+        ecouteSuite = false
         super.onStop()
         reconnaissance.cancel()
         ecoute = false
@@ -207,6 +232,7 @@ class MainActivity : ComponentActivity() {
 
     private val listener = object : RecognitionListener {
         override fun onResults(results: Bundle?) {
+            ecouteSuite = false
             ecoute = false
             val phrase = results
                 ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
@@ -221,6 +247,14 @@ class MainActivity : ComponentActivity() {
         }
 
         override fun onError(error: Int) {
+            if (ecouteSuite) {
+                // Silence après une réponse : on s'arrête sans message d'erreur
+                ecouteSuite = false
+                ecoute = false
+                niveauMicro = 0f
+                statut = derniereReponse
+                return
+            }
             ecoute = false
             reflexion = false
             niveauMicro = 0f
@@ -250,6 +284,12 @@ class MainActivity : ComponentActivity() {
 
     // --- 2. Compréhension ---
     private fun traiter(phrase: String) {
+        // La conversation s'oublie après 3 minutes sans échange
+        if (System.currentTimeMillis() - dernierEchange > 3 * 60_000) {
+            historique.clear()
+            historiqueNonFiable = false
+        }
+        phraseCourante = phrase
         // Commandes simples traitées sur le téléphone : instantané et gratuit
         analyseLocale(phrase)?.let { executer(it); return }
 
@@ -257,7 +297,7 @@ class MainActivity : ComponentActivity() {
         statut = "Je réfléchis…"
         lifecycleScope.launch {
             try {
-                val intention = withContext(Dispatchers.IO) { ClaudeClient.interpreter(this@MainActivity, phrase) }
+                val intention = withContext(Dispatchers.IO) { ClaudeClient.interpreter(this@MainActivity, phrase, historique.toList(), historiqueNonFiable) }
                 executer(intention)
             } catch (e: ConsentementGmail) {
                 reflexion = false
@@ -329,7 +369,14 @@ class MainActivity : ComponentActivity() {
                 evenementEnAttente = e
                 parler("${e.titre}, ${e.resume()}. Je l'ajoute ?")
             }
-            is Intention.Reponse -> parler(intention.texte)
+            is Intention.Reponse -> {
+                historique += phraseCourante to intention.texte
+                while (historique.size > 4) historique.removeAt(0)
+                if (intention.externes) historiqueNonFiable = true
+                dernierEchange = System.currentTimeMillis()
+                derniereReponse = intention.texte
+                parler(intention.texte, "suite")
+            }
         }
     }
 
