@@ -104,6 +104,73 @@ object Agenda {
         return premier
     }
 
+    /** Un événement existant, trouvé pour être supprimé. */
+    data class Trouve(
+        val eventId: Long,
+        val ev: EvenementBrouillon,
+        val recurrent: Boolean,
+        val modifiable: Boolean
+    )
+
+    private fun norm(s: String) = java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFD)
+        .replace(Regex("\\p{M}"), "").lowercase()
+
+    /** Les événements de la période dont le titre contient les mots demandés (tous si texte vide). */
+    fun chercher(context: Context, debut: LocalDateTime, fin: LocalDateTime, texte: String): List<Trouve> {
+        val uri = CalendarContract.Instances.CONTENT_URI.buildUpon().also {
+            ContentUris.appendId(it, debut.atZone(zone).toInstant().toEpochMilli())
+            ContentUris.appendId(it, fin.atZone(zone).toInstant().toEpochMilli())
+        }.build()
+        val mots = norm(texte).split(Regex("[^a-z0-9]+")).filter { it.length > 2 }
+        val trouves = mutableListOf<Trouve>()
+        context.contentResolver.query(
+            uri,
+            arrayOf(
+                CalendarContract.Instances.EVENT_ID,
+                CalendarContract.Instances.TITLE,
+                CalendarContract.Instances.BEGIN,
+                CalendarContract.Instances.END,
+                CalendarContract.Instances.ALL_DAY,
+                CalendarContract.Instances.EVENT_LOCATION,
+                CalendarContract.Instances.RRULE,
+                CalendarContract.Instances.CALENDAR_ACCESS_LEVEL
+            ),
+            null, null,
+            "${CalendarContract.Instances.BEGIN} ASC"
+        )?.use { c ->
+            while (c.moveToNext() && trouves.size < 20) {
+                val titre = c.getString(1) ?: "(sans titre)"
+                val t = norm(titre)
+                if (mots.isNotEmpty() && mots.none { t.contains(it) }) continue
+                val toute = c.getInt(4) == 1
+                val z = if (toute) ZoneId.of("UTC") else zone
+                val d = Instant.ofEpochMilli(c.getLong(2)).atZone(z).toLocalDateTime()
+                val f = Instant.ofEpochMilli(c.getLong(3)).atZone(z).toLocalDateTime()
+                trouves += Trouve(
+                    eventId = c.getLong(0),
+                    ev = EvenementBrouillon(titre, d, if (toute) f.minusDays(1) else f, toute, c.getString(5).orEmpty()),
+                    recurrent = !c.getString(6).isNullOrBlank(),
+                    modifiable = c.getInt(7) >= CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR
+                )
+            }
+        }
+        // Si plusieurs, on garde ceux qui contiennent le plus de mots demandés
+        if (trouves.size > 1 && mots.size > 1) {
+            val score = trouves.associateWith { tr -> mots.count { norm(tr.ev.titre).contains(it) } }
+            val max = score.values.max()
+            return trouves.filter { score[it] == max }
+        }
+        return trouves
+    }
+
+    fun supprimer(context: Context, t: Trouve) {
+        if (t.recurrent) throw IllegalStateException("Événement récurrent : à supprimer dans l'agenda")
+        val n = context.contentResolver.delete(
+            ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, t.eventId), null, null
+        )
+        if (n == 0) throw IllegalStateException("L'agenda a refusé la suppression")
+    }
+
     fun creer(context: Context, ev: EvenementBrouillon) {
         val agenda = agendaParDefaut(context) ?: throw IllegalStateException("Aucun agenda modifiable trouvé")
         val valeurs = ContentValues().apply {

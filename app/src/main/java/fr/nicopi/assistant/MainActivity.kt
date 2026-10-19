@@ -67,6 +67,10 @@ class MainActivity : ComponentActivity() {
     private var mailEnAttente by mutableStateOf<MailBrouillon?>(null)
     private var envoiMailEnCours by mutableStateOf(false)
     private var evenementEnAttente by mutableStateOf<EvenementBrouillon?>(null)
+    private var suppressionEnAttente by mutableStateOf<Agenda.Trouve?>(null)
+    /** Une carte attend une validation (bouton ou « oui » à la voix). */
+    private val carteEnAttente: Boolean
+        get() = smsEnAttente != null || mailEnAttente != null || evenementEnAttente != null || suppressionEnAttente != null
 
     /** Écran d'autorisation Google (première connexion à Gmail). */
     private val consentementGmail =
@@ -129,7 +133,7 @@ class MainActivity : ComponentActivity() {
                 // Carte à valider : on écoute la réponse « oui » / « non »
                 if (id == "confirmer" || id == "sms") runOnUiThread {
                     if (visible && !ecoute &&
-                        (smsEnAttente != null || mailEnAttente != null || evenementEnAttente != null)
+                        carteEnAttente
                     ) {
                         ecouteConfirmation = true
                         relanceConfirmation = 0
@@ -138,7 +142,7 @@ class MainActivity : ComponentActivity() {
                 }
                 // Conversation continue : après une réponse, on réécoute quelques secondes
                 if (id == "suite") runOnUiThread {
-                    if (visible && !ecoute && smsEnAttente == null && mailEnAttente == null && evenementEnAttente == null) {
+                    if (visible && !ecoute && !carteEnAttente) {
                         ecouteSuite = true
                         ecouter()
                     }
@@ -166,6 +170,7 @@ class MainActivity : ComponentActivity() {
         smsEnAttente = null
         mailEnAttente = null
         evenementEnAttente = null
+        suppressionEnAttente = null
         val essentielles = permissions.filter { it != Manifest.permission.POST_NOTIFICATIONS }
         val toutAccorde = essentielles.all {
             ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
@@ -275,7 +280,7 @@ class MainActivity : ComponentActivity() {
                 ecoute = false
                 reflexion = false
                 niveauMicro = 0f
-                val carte = mailEnAttente != null || evenementEnAttente != null
+                val carte = mailEnAttente != null || evenementEnAttente != null || suppressionEnAttente != null
                 if (carte && relanceConfirmation < 1 && visible) {
                     relanceConfirmation++
                     ecouter()
@@ -444,6 +449,11 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+            is Intention.SupprimerEvenement -> {
+                val t = intention.trouve
+                suppressionEnAttente = t
+                parler("Je supprime ${t.ev.titre}, ${t.ev.resume()} ?", "confirmer")
+            }
             is Intention.AjouterEvenement -> {
                 val e = intention.brouillon
                 evenementEnAttente = e
@@ -481,18 +491,33 @@ class MainActivity : ComponentActivity() {
         when (reponseOuiNon(phrase)) {
             true -> when {
                 evenementEnAttente != null -> ajouterEvenementEnAttente()
+                suppressionEnAttente != null -> supprimerEvenementEnAttente()
                 mailEnAttente != null -> envoyerMailEnAttente()
                 smsEnAttente != null -> envoyerSmsEnAttente()
             }
             false -> {
-                if (smsEnAttente != null || mailEnAttente != null || evenementEnAttente != null) {
+                if (carteEnAttente) {
                     smsEnAttente = null
                     mailEnAttente = null
                     evenementEnAttente = null
+                    suppressionEnAttente = null
                     parler("Annulé")
                 }
             }
             null -> if (smsEnAttente == null) statut = "Je n'ai pas compris : touche un bouton"
+        }
+    }
+
+    private fun supprimerEvenementEnAttente() {
+        val t = suppressionEnAttente ?: return
+        suppressionEnAttente = null
+        lifecycleScope.launch {
+            try {
+                withContext(Dispatchers.IO) { Agenda.supprimer(this@MainActivity, t) }
+                parler("C'est supprimé de ton agenda.")
+            } catch (e: Exception) {
+                statut = "Échec de la suppression : ${e.message}"
+            }
         }
     }
 
@@ -555,7 +580,7 @@ class MainActivity : ComponentActivity() {
 
     private val mode: Mode
         get() = when {
-            smsEnAttente != null || mailEnAttente != null || evenementEnAttente != null -> Mode.CONFIRMATION
+            carteEnAttente -> Mode.CONFIRMATION
             ecoute -> Mode.ECOUTE
             reflexion -> Mode.REFLEXION
             else -> Mode.PRET
@@ -601,7 +626,7 @@ class MainActivity : ComponentActivity() {
 
                 // Carte de confirmation à l'écran : orbe réduite et bulle masquée,
                 // pour que les boutons restent toujours visibles.
-                val carte = smsEnAttente != null || mailEnAttente != null || evenementEnAttente != null
+                val carte = carteEnAttente
                 Spacer(Modifier.weight(1f))
                 if (carte) {
                     Box(Modifier.size(130.dp), contentAlignment = Alignment.Center) {
@@ -614,6 +639,7 @@ class MainActivity : ComponentActivity() {
 
                 val texte = if (m == Mode.CONFIRMATION && smsEnAttente != null) "Envoi automatique…"
                     else if (m == Mode.CONFIRMATION && evenementEnAttente != null) "À ajouter ? Dis « oui » ou « non »"
+                    else if (m == Mode.CONFIRMATION && suppressionEnAttente != null) "À supprimer ? Dis « oui » ou « non »"
                     else if (m == Mode.CONFIRMATION) "À vérifier avant l'envoi"
                     else statut
                 AnimatedContent(
@@ -647,6 +673,7 @@ class MainActivity : ComponentActivity() {
                 if (sms != null) CarteSms(sms.first, sms.second)
                 else if (mail != null) CarteMail(mail)
                 else if (evenementEnAttente != null) CarteEvenement(evenementEnAttente!!)
+                else if (suppressionEnAttente != null) CarteEvenement(suppressionEnAttente!!.ev, suppression = true)
                 else BoutonMicro(c1, c2)
             }
         }
@@ -856,8 +883,8 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun CarteEvenement(ev: EvenementBrouillon) {
-        val violet = Color(0xFFC4A7FF)
+    private fun CarteEvenement(ev: EvenementBrouillon, suppression: Boolean = false) {
+        val violet = if (suppression) Color(0xFFFF9A8B) else Color(0xFFC4A7FF)
         Column(
             Modifier
                 .fillMaxWidth()
@@ -866,7 +893,7 @@ class MainActivity : ComponentActivity() {
                 .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(24.dp))
                 .padding(20.dp)
         ) {
-            Text("Nouvel événement", color = violet, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(if (suppression) "Supprimer de l'agenda" else "Nouvel événement", color = violet, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(8.dp))
             Text(ev.titre, color = Blanc, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(4.dp))
@@ -879,6 +906,7 @@ class MainActivity : ComponentActivity() {
                 OutlinedButton(
                     onClick = {
                         evenementEnAttente = null
+                        suppressionEnAttente = null
                         parler("Annulé")
                     },
                     modifier = Modifier.weight(1f).height(52.dp),
@@ -886,13 +914,13 @@ class MainActivity : ComponentActivity() {
                 ) { Text("Annuler", fontSize = 16.sp) }
 
                 Button(
-                    onClick = { ajouterEvenementEnAttente() },
+                    onClick = { if (suppression) supprimerEvenementEnAttente() else ajouterEvenementEnAttente() },
                     modifier = Modifier.weight(1f).height(52.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = violet,
                         contentColor = Color(0xFF1E1236)
                     )
-                ) { Text("Ajouter", fontSize = 16.sp, fontWeight = FontWeight.SemiBold) }
+                ) { Text(if (suppression) "Supprimer" else "Ajouter", fontSize = 16.sp, fontWeight = FontWeight.SemiBold) }
             }
         }
     }
