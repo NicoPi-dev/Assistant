@@ -36,8 +36,11 @@ class AnnonceMails : NotificationListenerService() {
         if (audio.ringerMode != AudioManager.RINGER_MODE_NORMAL) return
 
         // Une seule annonce par mail, même si la notification est mise à jour
-        if (sbn.key in dejaAnnonces) return
-        dejaAnnonces.addLast(sbn.key)
+        // Gmail garde la même clé pour toute une conversation : on y ajoute
+        // l'heure du mail, sinon les mails suivants du même fil sont ignorés.
+        val id = "${sbn.key}|${n.`when`}"
+        if (id in dejaAnnonces) return
+        dejaAnnonces.addLast(id)
         if (dejaAnnonces.size > 50) dejaAnnonces.removeFirst()
 
         val de = n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.take(60) ?: return
