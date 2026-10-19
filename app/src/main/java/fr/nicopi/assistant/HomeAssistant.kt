@@ -80,4 +80,58 @@ object HomeAssistant {
             conn.disconnect()
         }
     }
+
+    /**
+     * Historique d'un capteur entre deux dates (heure locale) : premières et dernières valeurs,
+     * minimum, maximum et moyenne. Pour un compteur journalier (remis à zéro chaque nuit),
+     * la consommation d'une journée est sa valeur maximale ce jour-là ; pour un compteur
+     * qui ne fait qu'augmenter (index), c'est la différence dernière − première valeur.
+     */
+    fun historique(
+        context: Context,
+        entityId: String,
+        debut: java.time.LocalDateTime,
+        fin: java.time.LocalDateTime
+    ): String {
+        val capteur = capteurs(context).firstOrNull { it.entityId == entityId }
+            ?: return "$entityId : non autorisé"
+        val zone = java.time.ZoneId.systemDefault()
+        val iso = java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME
+        val d = debut.atZone(zone).toOffsetDateTime().format(iso)
+        val f = fin.atZone(zone).toOffsetDateTime().format(iso)
+        val url = BuildConfig.HA_URL.trimEnd('/') + "/api/history/period/" + URLEncoder.encode(d, "UTF-8") +
+            "?filter_entity_id=" + URLEncoder.encode(entityId, "UTF-8") +
+            "&end_time=" + URLEncoder.encode(f, "UTF-8") +
+            "&minimal_response&no_attributes"
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 8_000
+            readTimeout = 20_000
+            setRequestProperty("Authorization", "Bearer ${BuildConfig.HA_TOKEN}")
+        }
+        return try {
+            if (conn.responseCode != 200) return "${capteur.libelle} : erreur Home Assistant ${conn.responseCode}"
+            val tout = org.json.JSONArray(conn.inputStream.bufferedReader().use { it.readText() })
+            if (tout.length() == 0) return "${capteur.libelle} : aucun historique sur cette période"
+            val points = tout.getJSONArray(0)
+            val valeurs = (0 until points.length())
+                .mapNotNull { points.getJSONObject(it).optString("state").toDoubleOrNull() }
+            if (valeurs.isEmpty()) {
+                // Capteur non numérique (porte, pompe…) : on liste les changements d'état
+                val etats = (0 until points.length()).map {
+                    val p = points.getJSONObject(it)
+                    p.optString("last_changed").take(16).replace('T', ' ') + " → " + p.optString("state")
+                }
+                return "${capteur.libelle} (changements d'état) :\n" + etats.takeLast(20).joinToString("\n")
+            }
+            fun r(x: Double) = "%.2f".format(java.util.Locale.FRANCE, x)
+            "${capteur.libelle} du ${debut.toString().replace('T', ' ')} au ${fin.toString().replace('T', ' ')} : " +
+                "première valeur ${r(valeurs.first())}, dernière ${r(valeurs.last())}, " +
+                "min ${r(valeurs.min())}, max ${r(valeurs.max())}, moyenne ${r(valeurs.average())} " +
+                "(${valeurs.size} relevés)"
+        } catch (e: Exception) {
+            "${capteur.libelle} : injoignable (${e.message})"
+        } finally {
+            conn.disconnect()
+        }
+    }
 }

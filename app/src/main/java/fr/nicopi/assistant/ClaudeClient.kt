@@ -58,6 +58,9 @@ object ClaudeClient {
         "is:unread newer_than:1d") et la production solaire du jour. Réponds en 4 à 6 phrases
         naturelles : météo, maison, rendez-vous du jour, mails à ne pas rater (expéditeur et sujet,
         sans les publicités), puis une touche sympa. Pas de liste, c'est lu à voix haute.
+        HISTORIQUE : pour « hier », « la semaine dernière », « ce mois-ci »… utilise
+        historique_maison. Compteur « jour » (remis à zéro à minuit) : la consommation d'une
+        journée = sa valeur max ce jour-là. Index qui ne fait qu'augmenter : dernière − première.
         CONVERSATION : les échanges précédents sont fournis ; « et demain ? », « et lui ? »
         font référence à ce qui vient d'être dit.
         Si la demande ne correspond à aucun outil, réponds en une phrase courte.
@@ -228,6 +231,25 @@ object ClaudeClient {
                 JSONObject(
                     """
                     {
+                      "name": "historique_maison",
+                      "description": "Historique d'un capteur de la maison sur une période passée (ex. hier, la semaine dernière). Renvoie première/dernière valeur, min, max, moyenne.",
+                      "input_schema": {
+                        "type": "object",
+                        "properties": {
+                          "entity_id": { "type": "string", "description": "Identifiant du capteur (liste fournie)" },
+                          "debut": { "type": "string", "description": "ex. 2026-10-18T00:00" },
+                          "fin": { "type": "string", "description": "ex. 2026-10-19T00:00" }
+                        },
+                        "required": ["entity_id", "debut", "fin"]
+                      }
+                    }
+                    """
+                )
+            )
+            base.put(
+                JSONObject(
+                    """
+                    {
                       "name": "lire_maison",
                       "description": "Lit l'état actuel d'un ou plusieurs capteurs Home Assistant de la maison. Utilise uniquement les identifiants de la liste fournie dans les instructions.",
                       "input_schema": {
@@ -369,6 +391,22 @@ object ClaudeClient {
                                         .put("type", "tool_result")
                                         .put("tool_use_id", bloc.getString("id"))
                                         .put("content", "<mails_non_fiables>\n$texte\n</mails_non_fiables>")
+                                )
+                            }
+                            "historique_maison" -> {
+                                resultats.put(
+                                    JSONObject()
+                                        .put("type", "tool_result")
+                                        .put("tool_use_id", bloc.getString("id"))
+                                        .put(
+                                            "content",
+                                            HomeAssistant.historique(
+                                                context,
+                                                input.getString("entity_id"),
+                                                Agenda.lireDate(input.getString("debut")),
+                                                Agenda.lireDate(input.getString("fin"))
+                                            )
+                                        )
                                 )
                             }
                             "lire_maison" -> {
