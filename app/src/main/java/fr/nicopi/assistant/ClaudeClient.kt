@@ -75,7 +75,9 @@ object ClaudeClient {
         sans les publicités), puis une touche sympa. Pas de liste, c'est lu à voix haute.
         HISTORIQUE : pour « hier », « la semaine dernière », « ce mois-ci »… utilise
         historique_maison. Compteur « jour » (remis à zéro à minuit) : la consommation d'une
-        journée = sa valeur max ce jour-là. Index qui ne fait qu'augmenter : dernière − première.
+        journée = sa valeur max ce jour-là ; sur plusieurs jours (semaine, mois), le total est la
+        « Somme des maxima journaliers » fournie. Index qui ne fait qu'augmenter : dernière − première.
+        « La semaine dernière » = du lundi 00:00 au lundi suivant 00:00. L'historique couvre les 10 derniers jours.
         CONVERSATION : les échanges précédents sont fournis ; « et demain ? », « et lui ? »
         font référence à ce qui vient d'être dit.
         MUSIQUE : musique_jouer et musique_controle ont un paramètre « ou ». « Sur le Sonos du bureau »,

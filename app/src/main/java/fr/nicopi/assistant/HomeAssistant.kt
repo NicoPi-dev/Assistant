@@ -163,7 +163,7 @@ object HomeAssistant {
             "&minimal_response&no_attributes"
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 8_000
-            readTimeout = 20_000
+            readTimeout = 45_000
             setRequestProperty("Authorization", "Bearer ${BuildConfig.HA_TOKEN}")
         }
         return try {
@@ -182,10 +182,26 @@ object HomeAssistant {
                 return "${capteur.libelle} (changements d'état) :\n" + etats.takeLast(20).joinToString("\n")
             }
             fun r(x: Double) = "%.2f".format(java.util.Locale.FRANCE, x)
+            // Détail jour par jour (heure locale). On ignore les 5 premières minutes après minuit :
+            // un compteur journalier y affiche encore le total de la veille avant sa remise à zéro.
+            val parJour = (0 until points.length()).mapNotNull { i ->
+                val p = points.getJSONObject(i)
+                val v = p.optString("state").toDoubleOrNull() ?: return@mapNotNull null
+                val t = runCatching {
+                    java.time.OffsetDateTime.parse(p.optString("last_changed")).atZoneSameInstant(zone).toLocalDateTime()
+                }.getOrNull() ?: return@mapNotNull null
+                if (t.hour == 0 && t.minute < 5) null else t.toLocalDate() to v
+            }.groupBy({ it.first }, { it.second }).toSortedMap()
+            val fmtJour = java.time.format.DateTimeFormatter.ofPattern("EEEE d MMMM", java.util.Locale.FRANCE)
+            val detail = if (parJour.size >= 2) {
+                "\nPar jour : " + parJour.entries.joinToString(" ; ") { (j, vs) -> "${j.format(fmtJour)} max ${r(vs.max())}" } +
+                    "\nSomme des maxima journaliers (= total de la période pour un compteur remis à zéro chaque nuit) : " +
+                    r(parJour.values.sumOf { it.max() }) + " sur ${parJour.size} jours"
+            } else ""
             "${capteur.libelle} du ${debut.toString().replace('T', ' ')} au ${fin.toString().replace('T', ' ')} : " +
                 "première valeur ${r(valeurs.first())}, dernière ${r(valeurs.last())}, " +
                 "min ${r(valeurs.min())}, max ${r(valeurs.max())}, moyenne ${r(valeurs.average())} " +
-                "(${valeurs.size} relevés)"
+                "(${valeurs.size} relevés)" + detail
         } catch (e: Exception) {
             "${capteur.libelle} : injoignable (${e.message})"
         } finally {
