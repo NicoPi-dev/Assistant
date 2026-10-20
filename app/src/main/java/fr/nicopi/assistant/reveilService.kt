@@ -47,7 +47,9 @@ class ReveilService : Service(), RecognitionListener {
 
         // Sensibilite : confiance minimale (0 a 1) exigee sur chaque mot du mot d'appel.
         // Plus haut = moins de faux declenchements, mais il faut parler plus distinctement.
-        private const val SEUIL = 0.85
+        private const val SEUIL = 0.72
+        // L'interjection (he / hey) est un mot court, souvent reconnu avec moins d'assurance
+        private const val SEUIL_INTERJECTION = 0.5
         private val INTERJECTIONS = setOf("h\u00e9", "eh", "hey")
 
         /** Depuis l'app au premier plan : démarre le service si besoin et coupe l'écoute. */
@@ -175,7 +177,7 @@ class ReveilService : Service(), RecognitionListener {
             if (mot.optString("word") == "claude" &&
                 avant.optString("word") in INTERJECTIONS &&
                 mot.optDouble("conf") >= SEUIL &&
-                avant.optDouble("conf") >= SEUIL
+                avant.optDouble("conf") >= SEUIL_INTERJECTION
             ) {
                 reveil()
                 return
