@@ -13,6 +13,7 @@ sealed class Intention {
     data class EnvoyerMail(val brouillon: MailBrouillon) : Intention()
     data class AjouterEvenement(val brouillon: EvenementBrouillon) : Intention()
     data class SupprimerEvenement(val trouve: Agenda.Trouve) : Intention()
+    object DesactiverAlarme : Intention()
     data class Alarme(val heure: Int, val minute: Int, val libelle: String, val jours: List<Int>) : Intention()
     data class Minuteur(val secondes: Int, val libelle: String) : Intention()
     data class Rappel(val quand: java.time.LocalDateTime, val texte: String) : Intention()
@@ -44,6 +45,10 @@ object ClaudeClient {
         Pour les portes et fenêtres, "on" signifie ouvert et "off" fermé.
         LUMIÈRES : utilise l'outil lumiere avec les identifiants de la liste « Lumières pilotables ».
         « Éteins tout » = toutes les lumières de la liste. Confirme en une phrase courte.
+        ALARME : outil alarme (etat, activer, desactiver). À l'activation, Home Assistant contrôle lui-même
+        les portes et fenêtres ; si l'alarme n'est pas activée, dis lesquelles sont ouvertes (lire_maison) et
+        que la question OUI / NON est sur le téléphone. La désactivation est confirmée à l'écran par $PRENOM.
+        Ne parle jamais de sirène : l'assistant n'y a pas accès.
         LISTE DE COURSES : outil liste_courses. Un article par élément, formulé simplement
         (« lait », « pain de mie »). « J'ai acheté le lait » ou « enlève le lait » = retirer.
         MÉTÉO À VENIR : pour demain, ce week-end, la semaine, utilise meteo_previsions (type jour) ;
@@ -294,6 +299,19 @@ object ClaudeClient {
         if (HomeAssistant.configure) {
             base.put(JSONObject("""
                 {
+                  "name": "alarme",
+                  "description": "Alarme de la maison : lire son état, l'activer (Home Assistant vérifie d'abord les portes et fenêtres) ou la désactiver (confirmation à l'écran).",
+                  "input_schema": {
+                    "type": "object",
+                    "properties": {
+                      "action": { "type": "string", "enum": ["etat", "activer", "desactiver"] }
+                    },
+                    "required": ["action"]
+                  }
+                }
+            """))
+            base.put(JSONObject("""
+                {
                   "name": "lumiere",
                   "description": "Allume ou éteint des lumières de la maison (uniquement celles de la liste « Lumières pilotables »), ou donne leur état.",
                   "input_schema": {
@@ -526,6 +544,23 @@ object ClaudeClient {
                                         .put("type", "tool_result")
                                         .put("tool_use_id", bloc.getString("id"))
                                         .put("content", "<mails_non_fiables>\n$texte\n</mails_non_fiables>")
+                                )
+                            }
+                            "alarme" -> {
+                                val action = input.optString("action", "etat")
+                                if (mailsLus && action != "etat") return Intention.Reponse(
+                                    "Par sécurité, je ne touche pas à l'alarme juste après avoir lu tes mails ou ton agenda. Redemande-le-moi séparément."
+                                )
+                                if (action == "desactiver") return when (Maison.alarmeActive()) {
+                                    false -> Intention.Reponse("L'alarme est déjà désactivée.")
+                                    null -> Intention.Reponse("Je ne peux pas lire l'état de l'alarme pour l'instant.")
+                                    true -> Intention.DesactiverAlarme
+                                }
+                                resultats.put(
+                                    JSONObject()
+                                        .put("type", "tool_result")
+                                        .put("tool_use_id", bloc.getString("id"))
+                                        .put("content", if (action == "activer") Maison.alarmeActiver() else Maison.alarmeEtat())
                                 )
                             }
                             "lumiere", "liste_courses" -> {

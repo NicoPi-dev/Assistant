@@ -120,6 +120,72 @@ object Maison {
         return (lignes + refusees.map { "$it : non autorisé" }).joinToString("\n").ifBlank { "Aucune lumière demandée." }
     }
 
+    // --- Alarme ---
+    // Seuls ces deux points d'entrée sont utilisés. Le contrôle des capteurs reste celui du
+    // script Home Assistant alarme_bouton (appelé par alarme_activer, qui ne coupe jamais l'alarme).
+    private const val ALARME = "input_boolean.alarme_active"
+    private const val ACTIVER = "script.alarme_activer"
+    private const val EJECTES = "sensor.alarme_capteurs_ejectes"
+
+    private fun lireEtat(entityId: String): JSONObject? {
+        val url = BuildConfig.HA_URL.trimEnd('/') + "/api/states/" + URLEncoder.encode(entityId, "UTF-8")
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 8_000
+            readTimeout = 10_000
+            setRequestProperty("Authorization", "Bearer ${BuildConfig.HA_TOKEN}")
+        }
+        return try {
+            if (conn.responseCode != 200) null
+            else JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+        } catch (e: Exception) {
+            null
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /** true = active, false = désactivée, null = illisible. */
+    fun alarmeActive(): Boolean? = when (lireEtat(ALARME)?.optString("state")) {
+        "on" -> true
+        "off" -> false
+        else -> null
+    }
+
+    private fun ejectes(): String {
+        val noms = lireEtat(EJECTES)?.optJSONObject("attributes")?.optJSONArray("noms") ?: return ""
+        val l = (0 until noms.length()).map { noms.optString(it) }.filter { it.isNotBlank() }
+        return if (l.isEmpty()) "" else " Capteurs éjectés (non surveillés) : ${l.joinToString()}."
+    }
+
+    fun alarmeEtat(): String = when (alarmeActive()) {
+        true -> "Alarme activée." + ejectes()
+        false -> "Alarme désactivée."
+        null -> "État de l'alarme illisible (Home Assistant injoignable ?)."
+    }
+
+    /** Lance le contrôle des capteurs puis l'activation. Appel réseau : hors thread principal. */
+    fun alarmeActiver(): String {
+        when (alarmeActive()) {
+            true -> return "L'alarme est déjà activée." + ejectes()
+            null -> return "Je ne peux pas lire l'état de l'alarme : je n'active rien."
+            false -> {}
+        }
+        service("script", "turn_on", JSONObject().put("entity_id", ACTIVER))
+        repeat(8) {
+            Thread.sleep(1_000)
+            if (alarmeActive() == true) return "Alarme activée." + ejectes()
+        }
+        return "Alarme PAS activée pour l'instant : au moins une porte ou fenêtre est ouverte ou hors ligne " +
+            "(utilise lire_maison sur les portes et fenêtres pour dire lesquelles). Une notification Home Assistant " +
+            "demande sur le téléphone s'il faut éjecter ces capteurs et activer (OUI) ou renoncer (NON)."
+    }
+
+    fun alarmeDesactiver() {
+        service("input_boolean", "turn_off", JSONObject().put("entity_id", ALARME))
+        Thread.sleep(500)
+        if (alarmeActive() != false) throw IllegalStateException("l'alarme n'a pas confirmé sa désactivation")
+    }
+
     // --- Liste de courses ---
 
     private fun norm(s: String) = Normalizer.normalize(s, Normalizer.Form.NFD)

@@ -68,9 +68,11 @@ class MainActivity : ComponentActivity() {
     private var envoiMailEnCours by mutableStateOf(false)
     private var evenementEnAttente by mutableStateOf<EvenementBrouillon?>(null)
     private var suppressionEnAttente by mutableStateOf<Agenda.Trouve?>(null)
+    private var alarmeEnAttente by mutableStateOf(false)
     /** Une carte attend une validation (bouton ou « oui » à la voix). */
     private val carteEnAttente: Boolean
-        get() = smsEnAttente != null || mailEnAttente != null || evenementEnAttente != null || suppressionEnAttente != null
+        get() = smsEnAttente != null || mailEnAttente != null || evenementEnAttente != null ||
+            suppressionEnAttente != null || alarmeEnAttente
 
     /** Écran d'autorisation Google (première connexion à Gmail). */
     private val consentementGmail =
@@ -171,6 +173,7 @@ class MainActivity : ComponentActivity() {
         mailEnAttente = null
         evenementEnAttente = null
         suppressionEnAttente = null
+        alarmeEnAttente = false
         val essentielles = permissions.filter { it != Manifest.permission.POST_NOTIFICATIONS }
         val toutAccorde = essentielles.all {
             ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
@@ -280,7 +283,7 @@ class MainActivity : ComponentActivity() {
                 ecoute = false
                 reflexion = false
                 niveauMicro = 0f
-                val carte = mailEnAttente != null || evenementEnAttente != null || suppressionEnAttente != null
+                val carte = mailEnAttente != null || evenementEnAttente != null || suppressionEnAttente != null || alarmeEnAttente
                 if (carte && relanceConfirmation < 1 && visible) {
                     relanceConfirmation++
                     ecouter()
@@ -449,6 +452,10 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+            is Intention.DesactiverAlarme -> {
+                alarmeEnAttente = true
+                parler("Je désactive l'alarme ?", "confirmer")
+            }
             is Intention.SupprimerEvenement -> {
                 val t = intention.trouve
                 suppressionEnAttente = t
@@ -492,6 +499,7 @@ class MainActivity : ComponentActivity() {
             true -> when {
                 evenementEnAttente != null -> ajouterEvenementEnAttente()
                 suppressionEnAttente != null -> supprimerEvenementEnAttente()
+                alarmeEnAttente -> desactiverAlarmeEnAttente()
                 mailEnAttente != null -> envoyerMailEnAttente()
                 smsEnAttente != null -> envoyerSmsEnAttente()
             }
@@ -501,10 +509,24 @@ class MainActivity : ComponentActivity() {
                     mailEnAttente = null
                     evenementEnAttente = null
                     suppressionEnAttente = null
-                    parler("Annulé")
+                    alarmeEnAttente = false
+                    parler("Annulé, l'alarme reste activée")
                 }
             }
             null -> if (smsEnAttente == null) statut = "Je n'ai pas compris : touche un bouton"
+        }
+    }
+
+    private fun desactiverAlarmeEnAttente() {
+        if (!alarmeEnAttente) return
+        alarmeEnAttente = false
+        lifecycleScope.launch {
+            try {
+                withContext(Dispatchers.IO) { Maison.alarmeDesactiver() }
+                parler("Alarme désactivée.")
+            } catch (e: Exception) {
+                parler("Échec de la désactivation : ${e.message}")
+            }
         }
     }
 
@@ -640,6 +662,7 @@ class MainActivity : ComponentActivity() {
                 val texte = if (m == Mode.CONFIRMATION && smsEnAttente != null) "Envoi automatique…"
                     else if (m == Mode.CONFIRMATION && evenementEnAttente != null) "À ajouter ? Dis « oui » ou « non »"
                     else if (m == Mode.CONFIRMATION && suppressionEnAttente != null) "À supprimer ? Dis « oui » ou « non »"
+                    else if (m == Mode.CONFIRMATION && alarmeEnAttente) "Désactiver l'alarme ? Dis « oui » ou « non »"
                     else if (m == Mode.CONFIRMATION) "À vérifier avant l'envoi"
                     else statut
                 AnimatedContent(
@@ -674,6 +697,7 @@ class MainActivity : ComponentActivity() {
                 else if (mail != null) CarteMail(mail)
                 else if (evenementEnAttente != null) CarteEvenement(evenementEnAttente!!)
                 else if (suppressionEnAttente != null) CarteEvenement(suppressionEnAttente!!.ev, suppression = true)
+                else if (alarmeEnAttente) CarteAlarme()
                 else BoutonMicro(c1, c2)
             }
         }
@@ -921,6 +945,39 @@ class MainActivity : ComponentActivity() {
                         contentColor = Color(0xFF1E1236)
                     )
                 ) { Text(if (suppression) "Supprimer" else "Ajouter", fontSize = 16.sp, fontWeight = FontWeight.SemiBold) }
+            }
+        }
+    }
+
+    @Composable
+    private fun CarteAlarme() {
+        val rouge = Color(0xFFFF9A8B)
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color.White.copy(alpha = 0.07f))
+                .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(24.dp))
+                .padding(20.dp)
+        ) {
+            Text("Alarme de la maison", color = rouge, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(8.dp))
+            Text("Désactiver l'alarme", color = Blanc, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(18.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(
+                    onClick = {
+                        alarmeEnAttente = false
+                        parler("Annulé, l'alarme reste activée")
+                    },
+                    modifier = Modifier.weight(1f).height(52.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Blanc)
+                ) { Text("Annuler", fontSize = 16.sp) }
+                Button(
+                    onClick = { desactiverAlarmeEnAttente() },
+                    modifier = Modifier.weight(1f).height(52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = rouge, contentColor = Color(0xFF3A0E08))
+                ) { Text("Désactiver", fontSize = 16.sp, fontWeight = FontWeight.SemiBold) }
             }
         }
     }
