@@ -11,6 +11,10 @@
         "libelle": "Lampe du bureau"
       }
     ],
+    "rappels_arrivee": {
+      "moi": "input_text.rappels_arrivee_moi",
+      "camille": "input_text.rappels_arrivee_camille"
+    },
     "courses": "todo.liste_de_courses",
     "televiseurs": [
       {

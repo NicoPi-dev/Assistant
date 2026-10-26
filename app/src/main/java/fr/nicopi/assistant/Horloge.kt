@@ -40,14 +40,16 @@ object Horloge {
      * au-delà, un événement d'agenda avec notification à l'heure dite.
      * Renvoie une phrase de confirmation.
      */
-    fun rappel(activite: Activity, quand: LocalDateTime, texte: String): String {
+    fun rappel(activite: Activity, quand: LocalDateTime, texte: String, sonnerie: Boolean = false): String {
         val maintenant = LocalDateTime.now()
         val jour = quand.format(DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.FRANCE))
         val h = quand.format(DateTimeFormatter.ofPattern("HH'h'mm"))
         if (quand.isBefore(maintenant)) return "Cette heure est déjà passée."
 
         if (Duration.between(maintenant, quand).toHours() < 24) {
-            alarme(activite, quand.hour, quand.minute, "Rappel : $texte", emptyList())
+            // Par défaut, un rappel discret (notification lue à voix haute) ; une alarme seulement si demandé
+            if (sonnerie) alarme(activite, quand.hour, quand.minute, "Rappel : $texte", emptyList())
+            else Rappels.planifier(activite, quand, texte)
             return "C'est noté, je te le rappelle à $h."
         }
 

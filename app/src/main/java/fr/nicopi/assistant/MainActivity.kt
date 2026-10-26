@@ -468,7 +468,7 @@ class MainActivity : ComponentActivity() {
                 lifecycleScope.launch {
                     try {
                         val phrase = withContext(Dispatchers.IO) {
-                            Horloge.rappel(this@MainActivity, intention.quand, intention.texte)
+                            Horloge.rappel(this@MainActivity, intention.quand, intention.texte, intention.sonnerie)
                         }
                         parler(phrase)
                     } catch (e: Exception) {

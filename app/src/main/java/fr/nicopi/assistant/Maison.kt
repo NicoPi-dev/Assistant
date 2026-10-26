@@ -20,6 +20,8 @@ object Maison {
 
     private var lumieres: List<Commande> = emptyList()
     private var courses: String? = null
+    /** Rappels à l'arrivée : « moi », « [prénom] »… -> input_text Home Assistant */
+    private var rappelsArrivee: Map<String, String> = emptyMap()
     private var charge = false
 
     private fun charger(context: Context) {
@@ -35,6 +37,10 @@ object Maison {
             Commande(o.getString("entity_id"), o.getString("libelle"))
         }.filter { it.entityId.startsWith("light.") || it.entityId.startsWith("switch.") }
         courses = c.optString("courses").takeIf { it.startsWith("todo.") }
+        rappelsArrivee = c.optJSONObject("rappels_arrivee")?.let { o ->
+            o.keys().asSequence().associate { k -> AnalyseLocale.norm(k) to o.optString(k) }
+                .filterValues { it.startsWith("input_text.") }
+        } ?: emptyMap()
     }
 
     fun lumieres(context: Context): List<Commande> {
@@ -44,8 +50,11 @@ object Maison {
     /** Ajouté aux instructions de Claude. */
     fun extraSysteme(context: Context): String {
         val l = lumieres(context)
-        return if (l.isEmpty()) "" else
+        val lum = if (l.isEmpty()) "" else
             "\n\nLumières pilotables (outil lumiere) :\n" + l.joinToString("\n") { "- ${it.entityId} : ${it.libelle}" }
+        val arr = if (rappelsArrivee.isEmpty()) "" else
+            "\n\nRappels à l'arrivée à la maison (outil rappel_arrivee) possibles pour : " + rappelsArrivee.keys.joinToString()
+        return lum + arr
     }
 
     // --- Appels Home Assistant ---
@@ -118,6 +127,29 @@ object Maison {
             }.fold({ "${c.libelle} : $it" }, { "${c.libelle} : échec (${it.message})" })
         }
         return (lignes + refusees.map { "$it : non autorisé" }).joinToString("\n").ifBlank { "Aucune lumière demandée." }
+    }
+
+    // --- Rappels à l'arrivée (une automatisation HA les annonce quand la personne rentre) ---
+
+    fun rappelArrivee(context: Context, qui: String, texte: String): String {
+        charger(context)
+        if (rappelsArrivee.isEmpty()) return "Les rappels à l'arrivée ne sont pas configurés."
+        val n = AnalyseLocale.norm(qui)
+        val cle = if (n in setOf("moi", "je", "me", "j", "nicolas", "")) "moi" else n
+        val entite = rappelsArrivee[cle] ?: rappelsArrivee.entries.firstOrNull { cle.contains(it.key) }?.value
+            ?: return "Je ne peux pas faire de rappel à l'arrivée de « $qui » (possible pour : ${rappelsArrivee.keys.joinToString()})."
+        val t = texte.trim().replace("|", "-")
+        if (t.isBlank()) return "Il manque ce qu'il faut rappeler."
+        val actuel = lireEtat(entite)?.optString("state").orEmpty()
+            .let { if (it in setOf("unknown", "unavailable")) "" else it }
+        val nouveau = if (actuel.isBlank()) t else "$actuel | $t"
+        if (nouveau.length > 255) return "Trop de rappels sont déjà en attente pour cette arrivée."
+        return try {
+            service("input_text", "set_value", JSONObject().put("entity_id", entite).put("value", nouveau))
+            "Rappel enregistré : il sera annoncé à l'arrivée à la maison."
+        } catch (e: Exception) {
+            "Impossible d'enregistrer le rappel (${e.message})"
+        }
     }
 
     // --- Alarme ---

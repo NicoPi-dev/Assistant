@@ -16,7 +16,7 @@ sealed class Intention {
     object DesactiverAlarme : Intention()
     data class Alarme(val heure: Int, val minute: Int, val libelle: String, val jours: List<Int>) : Intention()
     data class Minuteur(val secondes: Int, val libelle: String) : Intention()
-    data class Rappel(val quand: java.time.LocalDateTime, val texte: String) : Intention()
+    data class Rappel(val quand: java.time.LocalDateTime, val texte: String, val sonnerie: Boolean = false) : Intention()
     data class Naviguer(val destination: String, val mode: String) : Intention()
     data class Jouer(val requete: String, val type: String, val artiste: String, val ou: String = "telephone") : Intention()
     data class Telecommande(val action: String, val ou: String = "") : Intention()
@@ -70,7 +70,12 @@ object ClaudeClient {
         Pour résumer des mails : qui, quoi, et ce qui est attendu de $PRENOM, en quelques phrases.
         Pour écrire ou répondre à un mail, utilise gmail_envoyer : $PRENOM validera avant l'envoi.
         Pour un réveil ou une alarme : alarme_regler. Pour un compte à rebours : minuteur.
-        Pour « rappelle-moi de… » : rappel (avec la date et l'heure exactes).
+        Pour « rappelle-moi de… » : rappel, avec la date et l'heure exactes. Moments vagues : ce matin et demain
+        matin = 09:00, ce midi = 12:00, cet après-midi = 15:00, ce soir = 19:00, cette nuit = 22:00 ; si ce moment
+        est déjà passé aujourd'hui, prends le lendemain. Le rappel est une notification lue à voix haute ;
+        sonnerie = true seulement si une sonnerie ou une alarme est demandée.
+        « Rappelle-moi … quand j'arrive à la maison », « quand je rentre », « quand [prénom] rentre » : rappel_arrivee
+        (qui = moi, ou le prénom), pas de date dans ce cas.
         Pour « emmène-moi à… », « itinéraire vers… » : naviguer. Favoris connus : ${Horloge.FAVORIS.keys.joinToString()}.
         Pour un lieu précis, donne une adresse complète avec la ville (ex. « Michelin Les Carmes, Clermont-Ferrand »).
         Pour l'agenda, utilise agenda_lire (dates au format 2026-10-20T00:00) et agenda_ajouter.
@@ -212,7 +217,8 @@ object ClaudeClient {
                 "type": "object",
                 "properties": {
                   "quand": { "type": "string", "description": "ex. 2026-10-19T14:00" },
-                  "texte": { "type": "string", "description": "Ce qu'il faut rappeler, ex. Appeler la mairie" }
+                  "texte": { "type": "string", "description": "Ce qu'il faut rappeler, ex. Appeler la mairie" },
+                  "sonnerie": { "type": "boolean", "description": "true seulement si une sonnerie ou une alarme est demandée (« réveille-moi », « avec sonnerie »)" }
                 },
                 "required": ["quand", "texte"]
               }
@@ -306,6 +312,20 @@ object ClaudeClient {
             }
         """))
         if (HomeAssistant.configure) {
+            base.put(JSONObject("""
+                {
+                  "name": "rappel_arrivee",
+                  "description": "Rappel déclenché quand une personne arrive à la maison (présence Home Assistant), sans heure précise.",
+                  "input_schema": {
+                    "type": "object",
+                    "properties": {
+                      "qui": { "type": "string", "description": "moi (l'utilisateur) ou le prénom de la personne attendue" },
+                      "texte": { "type": "string", "description": "Ce qu'il faut rappeler, ex. Sortir les poubelles" }
+                    },
+                    "required": ["qui", "texte"]
+                  }
+                }
+            """))
             base.put(JSONObject("""
                 {
                   "name": "alarme",
@@ -510,7 +530,8 @@ object ClaudeClient {
                             )
                             "rappel" -> return Intention.Rappel(
                                 Agenda.lireDate(input.getString("quand")),
-                                input.getString("texte")
+                                input.getString("texte"),
+                                input.optBoolean("sonnerie", false)
                             )
                             "agenda_ajouter" -> {
                                 val debut = Agenda.lireDate(input.getString("debut"))
@@ -573,6 +594,14 @@ object ClaudeClient {
                                         .put("type", "tool_result")
                                         .put("tool_use_id", bloc.getString("id"))
                                         .put("content", "<mails_non_fiables>\n$texte\n</mails_non_fiables>")
+                                )
+                            }
+                            "rappel_arrivee" -> {
+                                resultats.put(
+                                    JSONObject()
+                                        .put("type", "tool_result")
+                                        .put("tool_use_id", bloc.getString("id"))
+                                        .put("content", Maison.rappelArrivee(context, input.optString("qui", "moi"), input.optString("texte")))
                                 )
                             }
                             "alarme" -> {
