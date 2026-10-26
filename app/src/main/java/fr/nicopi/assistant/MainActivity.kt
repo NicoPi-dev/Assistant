@@ -99,6 +99,14 @@ class MainActivity : ComponentActivity() {
     /** Où la musique a été lancée en dernier (pour « pause », « suivant » sans précision). */
     private var dernierOu = "telephone"
     private var visible = false
+    /** « Hey Claude » (écoute permanente) : désactivé par défaut, l'appli s'ouvre par l'icône. */
+    private var heyClaude by mutableStateOf(false)
+    /** Fermeture automatique après 10 s sans utilisation. */
+    private val FERMETURE_MS = 10_000L
+    @Volatile private var derniereActivite = System.currentTimeMillis()
+    @Volatile private var traitementEnCours = false
+    /** Un écran de réglage ou de consentement Google est ouvert : ne pas fermer l'appli. */
+    private var horsAppli = false
     private var lectureFinie by mutableStateOf(false)
 
     /** Délai avant l'envoi automatique d'un SMS, une fois le message lu à voix haute. */
@@ -155,6 +163,8 @@ class MainActivity : ComponentActivity() {
         })
         reconnaissance = SpeechRecognizer.createSpeechRecognizer(this)
         reconnaissance.setRecognitionListener(listener)
+        heyClaude = Reglages.heyClaude(this)
+        surveillerInactivite()
 
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) { Ecran() }
@@ -182,9 +192,10 @@ class MainActivity : ComponentActivity() {
             demandePermissions.launch(permissions)
             return
         }
-        // Coupe l'écoute du mot d'appel (et démarre le service s'il ne tourne pas)
-        ReveilService.pauser(this)
-        if (verifierReglages()) return
+        // « Hey Claude » actif : on coupe son écoute pendant que l'appli est ouverte.
+        // Inactif : le service ne tourne pas du tout.
+        if (heyClaude) ReveilService.pauser(this) else ReveilService.arreter(this)
+        if (verifierReglages()) { horsAppli = true; return }
         // Laisse au service le temps de libérer le micro
         lifecycleScope.launch {
             delay(400)
@@ -194,7 +205,7 @@ class MainActivity : ComponentActivity() {
 
     /** Réglages spéciaux, un par lancement. Renvoie true si on a ouvert un écran de réglage. */
     private fun verifierReglages(): Boolean {
-        if (!Settings.canDrawOverlays(this)) {
+        if (heyClaude && !Settings.canDrawOverlays(this)) {
             statut = "Autorise « Afficher par-dessus les autres applis » pour « Hey Claude »"
             startActivity(
                 Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
@@ -202,7 +213,7 @@ class MainActivity : ComponentActivity() {
             return true
         }
         val pm = getSystemService(PowerManager::class.java)
-        if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+        if (heyClaude && !pm.isIgnoringBatteryOptimizations(packageName)) {
             statut = "Autorise l'app à tourner en arrière-plan"
             startActivity(
                 Intent(
@@ -225,6 +236,8 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         visible = true
+        horsAppli = false
+        derniereActivite = System.currentTimeMillis()
     }
 
     override fun onStop() {
@@ -234,7 +247,7 @@ class MainActivity : ComponentActivity() {
         super.onStop()
         reconnaissance.cancel()
         ecoute = false
-        ReveilService.reprendre(this)
+        if (heyClaude) ReveilService.reprendre(this)
     }
 
     // --- 1. Écoute ---
@@ -252,6 +265,7 @@ class MainActivity : ComponentActivity() {
         reflexion = false
         statut = "Je t'écoute…"
         ecoute = true
+        derniereActivite = System.currentTimeMillis()
         reconnaissance.startListening(intent)
     }
 
@@ -344,15 +358,21 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             try {
                 val intention = withContext(Dispatchers.IO) {
-                    // Tri rapide sur le téléphone : ordre simple reconnu = exécuté tout de suite, sans Claude
-                    runCatching { AnalyseLocale.essayer(this@MainActivity, phrase) }.getOrNull()
-                        ?: ClaudeClient.interpreter(this@MainActivity, phrase, historique.toList(), historiqueNonFiable)
+                    traitementEnCours = true
+                    try {
+                        // Tri rapide sur le téléphone : ordre simple reconnu = exécuté tout de suite, sans Claude
+                        runCatching { AnalyseLocale.essayer(this@MainActivity, phrase) }.getOrNull()
+                            ?: ClaudeClient.interpreter(this@MainActivity, phrase, historique.toList(), historiqueNonFiable)
+                    } finally {
+                        traitementEnCours = false
+                        derniereActivite = System.currentTimeMillis()
+                    }
                 }
                 executer(intention)
             } catch (e: ConsentementGmail) {
                 reflexion = false
                 statut = "Connexion à Gmail…"
-                consentementGmail.launch(IntentSenderRequest.Builder(e.intention.intentSender).build())
+                horsAppli = true; consentementGmail.launch(IntentSenderRequest.Builder(e.intention.intentSender).build())
             } catch (e: Exception) {
                 reflexion = false
                 statut = "Erreur : ${e.message}"
@@ -569,7 +589,7 @@ class MainActivity : ComponentActivity() {
                 mailEnAttente = null
                 parler("Mail envoyé à ${mail.nomAffiche}")
             } catch (e: ConsentementGmail) {
-                consentementGmail.launch(IntentSenderRequest.Builder(e.intention.intentSender).build())
+                horsAppli = true; consentementGmail.launch(IntentSenderRequest.Builder(e.intention.intentSender).build())
             } catch (e: Exception) {
                 statut = "Échec de l'envoi : ${e.message}"
             } finally {
@@ -580,6 +600,7 @@ class MainActivity : ComponentActivity() {
 
     private fun parler(texte: String, id: String = "assistant") {
         reflexion = false
+        derniereActivite = System.currentTimeMillis()
         statut = texte
         tts.speak(texte, TextToSpeech.QUEUE_FLUSH, null, id)
     }
@@ -726,7 +747,13 @@ class MainActivity : ComponentActivity() {
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text("Assistant", color = Blanc, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                Text("Dis « Hey Claude »", color = Blanc.copy(alpha = 0.55f), fontSize = 13.sp)
+                Text(
+                    if (heyClaude) "« Hey Claude » activé · toucher pour couper"
+                    else "« Hey Claude » coupé · toucher pour activer",
+                    color = Blanc.copy(alpha = 0.55f),
+                    fontSize = 13.sp,
+                    modifier = Modifier.clickable { basculerHeyClaude() }
+                )
             }
             Row(
                 Modifier
@@ -1068,6 +1095,52 @@ class MainActivity : ComponentActivity() {
                 color = Blanc.copy(alpha = 0.5f),
                 fontSize = 13.sp
             )
+        }
+    }
+
+    private fun basculerHeyClaude() {
+        heyClaude = !heyClaude
+        Reglages.setHeyClaude(this, heyClaude)
+        derniereActivite = System.currentTimeMillis()
+        if (heyClaude) {
+            ReveilService.pauser(this) // démarre le service, en pause tant que l'appli est ouverte
+            if (verifierReglages()) horsAppli = true
+            else parler("Hey Claude activé")
+        } else {
+            ReveilService.arreter(this)
+            parler("Hey Claude coupé")
+        }
+    }
+
+    /**
+     * Ferme l'appli après 10 s sans utilisation (rien à l'écoute, rien en cours, aucune carte à valider).
+     * Sans « Hey Claude », le processus est arrêté, comme « Forcer l'arrêt » : plus rien ne tourne.
+     */
+    private fun surveillerInactivite() {
+        lifecycleScope.launch {
+            while (true) {
+                delay(1_000)
+                val occupe = ecoute || traitementEnCours || carteEnAttente || envoiMailEnCours ||
+                    horsAppli || tts.isSpeaking
+                if (occupe) {
+                    derniereActivite = System.currentTimeMillis()
+                    continue
+                }
+                if (System.currentTimeMillis() - derniereActivite >= FERMETURE_MS) {
+                    fermer()
+                    return@launch
+                }
+            }
+        }
+    }
+
+    private fun fermer() {
+        reconnaissance.cancel()
+        tts.stop()
+        finishAndRemoveTask()
+        if (!heyClaude) {
+            ReveilService.arreter(this)
+            android.os.Process.killProcess(android.os.Process.myPid())
         }
     }
 

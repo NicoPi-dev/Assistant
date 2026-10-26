@@ -57,6 +57,11 @@ class ReveilService : Service(), RecognitionListener {
             ctx.startForegroundService(Intent(ctx, ReveilService::class.java).setAction(ACTION_PAUSE))
         }
 
+        /** « Hey Claude » coupé : arrête complètement le service (plus de micro ouvert). */
+        fun arreter(ctx: Context) {
+            ctx.stopService(Intent(ctx, ReveilService::class.java))
+        }
+
         /** Quand l'app passe en arrière-plan : reprend l'écoute du mot d'appel. */
         fun reprendre(ctx: Context) {
             try {
@@ -88,6 +93,12 @@ class ReveilService : Service(), RecognitionListener {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Mot d'appel coupé dans les réglages : on ne tourne pas, et Android ne nous relance pas
+        if (!Reglages.heyClaude(this)) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        }
         when (intent?.action) {
             ACTION_PAUSE -> {
                 passerAuPremierPlan()
