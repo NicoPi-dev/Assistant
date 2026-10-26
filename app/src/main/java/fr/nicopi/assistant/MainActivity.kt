@@ -343,7 +343,11 @@ class MainActivity : ComponentActivity() {
         statut = "Je réfléchis…"
         lifecycleScope.launch {
             try {
-                val intention = withContext(Dispatchers.IO) { ClaudeClient.interpreter(this@MainActivity, phrase, historique.toList(), historiqueNonFiable) }
+                val intention = withContext(Dispatchers.IO) {
+                    // Tri rapide sur le téléphone : ordre simple reconnu = exécuté tout de suite, sans Claude
+                    runCatching { AnalyseLocale.essayer(this@MainActivity, phrase) }.getOrNull()
+                        ?: ClaudeClient.interpreter(this@MainActivity, phrase, historique.toList(), historiqueNonFiable)
+                }
                 executer(intention)
             } catch (e: ConsentementGmail) {
                 reflexion = false
