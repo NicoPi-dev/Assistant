@@ -49,6 +49,15 @@ object ClaudeClient {
         les portes et fenêtres ; si l'alarme n'est pas activée, dis lesquelles sont ouvertes (lire_maison) et
         que la question OUI / NON est sur le téléphone. La désactivation est confirmée à l'écran par $PRENOM.
         Ne parle jamais de sirène : l'assistant n'y a pas accès.
+        TV : outil tv, avec les identifiants de la liste « TV pilotables » (la TV du salon = Samsung,
+        la TV du bureau = Xiaomi). « Éteins les TV » / « toutes » = toutes les TV de la liste. Sans précision,
+        lis d'abord leur état (action etat) : s'il n'y en a qu'une allumée, c'est elle ; sinon demande laquelle.
+        Appli : donne un nom de la liste de la TV ; si la TV est éteinte, l'outil l'allume tout seul.
+        « Mets la 13 », « chaîne 2 » : action chaine. « Mets le son à 20 » : volume niveau 20.
+        « Monte / baisse le son » : volume_plus / volume_moins, pas 3 (un peu : 2, beaucoup : 8).
+        Coupe / remets le son : muet / son. Pause, reprise, suivant : pause, lecture, suivant.
+        HDMI ou TV en direct : source. Naviguer dans un menu (« descends », « valide », « retour ») : touches.
+        Confirme en une phrase courte.
         LISTE DE COURSES : outil liste_courses. Un article par élément, formulé simplement
         (« lait », « pain de mie »). « J'ai acheté le lait » ou « enlève le lait » = retirer.
         MÉTÉO À VENIR : pour demain, ce week-end, la semaine, utilise meteo_previsions (type jour) ;
@@ -312,6 +321,26 @@ object ClaudeClient {
             """))
             base.put(JSONObject("""
                 {
+                  "name": "tv",
+                  "description": "Commande les TV de la maison (uniquement celles de la liste « TV pilotables ») : état, marche/arrêt, volume, applis, chaînes, source, touches de la télécommande, lecture.",
+                  "input_schema": {
+                    "type": "object",
+                    "properties": {
+                      "tv": { "type": "array", "items": { "type": "string" }, "description": "Identifiants media_player de la liste, ou [\"toutes\"]" },
+                      "action": { "type": "string", "enum": ["etat", "allumer", "eteindre", "volume", "volume_plus", "volume_moins", "muet", "son", "lecture", "pause", "stop", "suivant", "precedent", "appli", "chaine", "source", "touches"] },
+                      "niveau": { "type": "integer", "description": "Volume 0 à 100, pour l'action volume" },
+                      "pas": { "type": "integer", "description": "Nombre de crans, 1 à 15, pour volume_plus / volume_moins" },
+                      "appli": { "type": "string", "description": "Nom d'une appli de la liste de cette TV" },
+                      "chaine": { "type": "string", "description": "Numéro de chaîne, ex. 13" },
+                      "source": { "type": "string", "enum": ["tv", "hdmi1", "hdmi2", "hdmi3", "hdmi4"] },
+                      "touches": { "type": "array", "items": { "type": "string", "enum": ${JSONArray(Televiseurs.NOMS_TOUCHES)} }, "description": "Touches dans l'ordre, 20 au maximum" }
+                    },
+                    "required": ["tv", "action"]
+                  }
+                }
+            """))
+            base.put(JSONObject("""
+                {
                   "name": "lumiere",
                   "description": "Allume ou éteint des lumières de la maison (uniquement celles de la liste « Lumières pilotables »), ou donne leur état.",
                   "input_schema": {
@@ -398,7 +427,7 @@ object ClaudeClient {
 
     private fun system(context: Context): String =
         "Nous sommes le ${Agenda.maintenant()} (heure de Paris).\n\n" + if (HomeAssistant.configure)
-            SYSTEM_BASE + "\n\nCapteurs de la maison disponibles :\n" + HomeAssistant.catalogue(context) + Maison.extraSysteme(context)
+            SYSTEM_BASE + "\n\nCapteurs de la maison disponibles :\n" + HomeAssistant.catalogue(context) + Maison.extraSysteme(context) + Televiseurs.extraSysteme(context)
         else SYSTEM_BASE
 
     /** Appel réseau : à lancer hors du thread principal (Dispatchers.IO). */
@@ -561,6 +590,33 @@ object ClaudeClient {
                                         .put("type", "tool_result")
                                         .put("tool_use_id", bloc.getString("id"))
                                         .put("content", if (action == "activer") Maison.alarmeActiver() else Maison.alarmeEtat())
+                                )
+                            }
+                            "tv" -> {
+                                fun liste(cle: String): List<String> {
+                                    val a = input.optJSONArray(cle) ?: return emptyList()
+                                    return (0 until a.length()).map { a.getString(it) }
+                                }
+                                val action = input.optString("action", "etat")
+                                val texte = if (mailsLus && action != "etat")
+                                    "Refusé par sécurité : pas de commande de TV juste après la lecture de mails ou de l'agenda."
+                                else Televiseurs.commander(
+                                    context, liste("tv"),
+                                    Televiseurs.Demande(
+                                        action = action,
+                                        niveau = if (input.has("niveau")) input.optInt("niveau") else null,
+                                        pas = if (input.has("pas")) input.optInt("pas") else null,
+                                        appli = input.optString("appli").ifBlank { null },
+                                        chaine = input.optString("chaine").ifBlank { null },
+                                        touches = liste("touches"),
+                                        source = input.optString("source").ifBlank { null }
+                                    )
+                                )
+                                resultats.put(
+                                    JSONObject()
+                                        .put("type", "tool_result")
+                                        .put("tool_use_id", bloc.getString("id"))
+                                        .put("content", texte)
                                 )
                             }
                             "lumiere", "liste_courses" -> {

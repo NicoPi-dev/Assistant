@@ -2,20 +2,57 @@
   "_info": "Exemple de liste blanche. Copier en home_assistant_capteurs.json et remplacer par vos propres entites.",
   "commandes": {
     "lumieres": [
-      { "entity_id": "light.salon", "libelle": "Lumière du salon" },
-      { "entity_id": "switch.prise_lampe", "libelle": "Lampe du bureau" }
+      {
+        "entity_id": "light.salon",
+        "libelle": "Lumière du salon"
+      },
+      {
+        "entity_id": "switch.prise_lampe",
+        "libelle": "Lampe du bureau"
+      }
     ],
-    "courses": "todo.liste_de_courses"
+    "courses": "todo.liste_de_courses",
+    "televiseurs": [
+      {
+        "media_player": "media_player.tv_salon",
+        "remote": "remote.tv_salon",
+        "libelle": "TV du salon",
+        "type": "samsung",
+        "applis": {
+          "Netflix": "3201907018807",
+          "YouTube": "111299001912"
+        }
+      },
+      {
+        "media_player": "media_player.tv_bureau",
+        "remote": "remote.tv_bureau",
+        "libelle": "TV du bureau",
+        "type": "fire",
+        "applis": {
+          "Netflix": "com.netflix.ninja",
+          "TV en direct": "com.amazon.tv.livetv"
+        }
+      }
+    ]
   },
   "groupes": {
     "Interieur": [
-      { "entity_id": "sensor.temperature_salon", "libelle": "Temperature du salon" }
+      {
+        "entity_id": "sensor.temperature_salon",
+        "libelle": "Temperature du salon"
+      }
     ],
     "Solaire": [
-      { "entity_id": "sensor.production_solaire", "libelle": "Production solaire instantanee" }
+      {
+        "entity_id": "sensor.production_solaire",
+        "libelle": "Production solaire instantanee"
+      }
     ],
     "Portes et fenetres": [
-      { "entity_id": "binary_sensor.porte_entree", "libelle": "Porte d'entree" }
+      {
+        "entity_id": "binary_sensor.porte_entree",
+        "libelle": "Porte d'entree"
+      }
     ]
   }
 }

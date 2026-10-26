@@ -50,7 +50,7 @@ object Maison {
 
     // --- Appels Home Assistant ---
 
-    private fun service(domaine: String, service: String, donnees: JSONObject, reponse: Boolean = false): JSONObject? {
+    internal fun service(domaine: String, service: String, donnees: JSONObject, reponse: Boolean = false): JSONObject? {
         val url = BuildConfig.HA_URL.trimEnd('/') + "/api/services/$domaine/$service" +
             if (reponse) "?return_response" else ""
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
@@ -127,7 +127,7 @@ object Maison {
     private const val ACTIVER = "script.alarme_activer"
     private const val EJECTES = "sensor.alarme_capteurs_ejectes"
 
-    private fun lireEtat(entityId: String): JSONObject? {
+    internal fun lireEtat(entityId: String): JSONObject? {
         val url = BuildConfig.HA_URL.trimEnd('/') + "/api/states/" + URLEncoder.encode(entityId, "UTF-8")
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 8_000
