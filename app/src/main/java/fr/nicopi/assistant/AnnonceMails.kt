@@ -20,7 +20,7 @@ class AnnonceMails : NotificationListenerService() {
     override fun onListenerConnected() {
         tts = TextToSpeech(this) {
             if (it == TextToSpeech.SUCCESS) {
-                tts?.language = Locale.FRANCE
+                tts?.let { t -> Reglages.appliquerVoix(this, t) }
                 pret = true
             }
         }
@@ -34,6 +34,8 @@ class AnnonceMails : NotificationListenerService() {
         // Pas d'annonce si le téléphone est en silencieux ou vibreur
         val audio = getSystemService(AudioManager::class.java)
         if (audio.ringerMode != AudioManager.RINGER_MODE_NORMAL) return
+        // Annonce coupée dans les réglages, ou heures calmes
+        if (!Reglages.annonceMails(this) || Reglages.enHeuresCalmes(this)) return
 
         // Une seule annonce par mail, même si la notification est mise à jour
         // Gmail garde la même clé pour toute une conversation : on y ajoute
@@ -50,7 +52,8 @@ class AnnonceMails : NotificationListenerService() {
             if (sujet.contains("NicoPi", true)) "NicoPi" else "toi-même"
         } else titre
         if (pret) {
-            tts?.speak("Nouveau mail de $de. $sujet", TextToSpeech.QUEUE_ADD, Reglages.parametresVoix(), sbn.key)
+            tts?.let { t -> Reglages.appliquerVoix(this, t) }
+            tts?.speak("Nouveau mail de $de. $sujet", TextToSpeech.QUEUE_ADD, Reglages.parametresVoix(this), sbn.key)
         }
     }
 

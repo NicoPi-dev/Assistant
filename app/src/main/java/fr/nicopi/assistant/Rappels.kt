@@ -108,6 +108,7 @@ class RappelRecu : BroadcastReceiver() {
 
         val audio = context.getSystemService(AudioManager::class.java)
         if (audio.ringerMode != AudioManager.RINGER_MODE_NORMAL) return
+        if (Reglages.enHeuresCalmes(context)) return
 
         val fin = goAsync()
         val main = Handler(Looper.getMainLooper())
@@ -122,14 +123,14 @@ class RappelRecu : BroadcastReceiver() {
         tts = TextToSpeech(context.applicationContext) { etat ->
             val moteur = tts
             if (etat != TextToSpeech.SUCCESS || moteur == null) { terminer(); return@TextToSpeech }
-            moteur.language = Locale.FRANCE
+            Reglages.appliquerVoix(context, moteur)
             moteur.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {}
                 override fun onDone(utteranceId: String?) { main.post { terminer() } }
                 @Deprecated("Deprecated in Java")
                 override fun onError(utteranceId: String?) { main.post { terminer() } }
             })
-            moteur.speak("Rappel : $texte", TextToSpeech.QUEUE_FLUSH, Reglages.parametresVoix(), "rappel")
+            moteur.speak("Rappel : $texte", TextToSpeech.QUEUE_FLUSH, Reglages.parametresVoix(context), "rappel")
         }
         // Sécurité : un récepteur ne doit pas durer plus de quelques secondes
         main.postDelayed({ terminer() }, 9_000)

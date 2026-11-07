@@ -56,6 +56,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.first
 import kotlin.math.ceil
 import java.util.Locale
+import kotlin.math.roundToInt
 import java.text.Normalizer
 
 class MainActivity : ComponentActivity() {
@@ -101,8 +102,11 @@ class MainActivity : ComponentActivity() {
     private var visible = false
     /** « Hey Claude » (écoute permanente) : désactivé par défaut, l'appli s'ouvre par l'icône. */
     private var heyClaude by mutableStateOf(false)
+    /** Écran « Réglages » ouvert (roue dentée). */
+    private var reglagesOuverts by mutableStateOf(false)
+    private var voixDispo by mutableStateOf(listOf<android.speech.tts.Voice>())
     /** Fermeture automatique après 10 s sans utilisation. */
-    private val FERMETURE_MS = 10_000L
+    private val FERMETURE_MS: Long get() = Reglages.fermetureSecondes(this) * 1000L
     @Volatile private var derniereActivite = System.currentTimeMillis()
     @Volatile private var traitementEnCours = false
     /** Un écran de réglage ou de consentement Google est ouvert : ne pas fermer l'appli. */
@@ -110,7 +114,7 @@ class MainActivity : ComponentActivity() {
     private var lectureFinie by mutableStateOf(false)
 
     /** Délai avant l'envoi automatique d'un SMS, une fois le message lu à voix haute. */
-    private val DELAI_ENVOI_MS = 5000L
+    private val DELAI_ENVOI_MS: Long get() = Reglages.delaiSmsSecondes(this) * 1000L
 
     private lateinit var reconnaissance: SpeechRecognizer
     private lateinit var tts: TextToSpeech
@@ -135,7 +139,12 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
-        tts = TextToSpeech(this) { if (it == TextToSpeech.SUCCESS) tts.language = Locale.FRANCE }
+        tts = TextToSpeech(this) {
+            if (it == TextToSpeech.SUCCESS) {
+                Reglages.appliquerVoix(this, tts)
+                voixDispo = Reglages.voixFrancaises(tts)
+            }
+        }
         tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(id: String?) {}
             override fun onDone(id: String?) {
@@ -496,7 +505,7 @@ class MainActivity : ComponentActivity() {
                 if (intention.externes) historiqueNonFiable = true
                 dernierEchange = System.currentTimeMillis()
                 derniereReponse = intention.texte
-                parler(intention.texte, "suite")
+                parler(intention.texte, if (Reglages.conversationContinue(this)) "suite" else "assistant")
             }
         }
     }
@@ -602,7 +611,7 @@ class MainActivity : ComponentActivity() {
         reflexion = false
         derniereActivite = System.currentTimeMillis()
         statut = texte
-        tts.speak(texte, TextToSpeech.QUEUE_FLUSH, Reglages.parametresVoix(), id)
+        tts.speak(texte, TextToSpeech.QUEUE_FLUSH, Reglages.parametresVoix(this), id)
     }
 
     private fun envoyerSmsEnAttente() {
@@ -637,6 +646,7 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun Ecran() {
+        if (reglagesOuverts) { EcranReglages(); return }
         val m = mode
         val c1 by animateColorAsState(m.c1, tween(600), label = "c1")
         val c2 by animateColorAsState(m.c2, tween(600), label = "c2")
@@ -748,11 +758,11 @@ class MainActivity : ComponentActivity() {
             Column(Modifier.weight(1f)) {
                 Text("Assistant", color = Blanc, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 Text(
-                    if (heyClaude) "« Hey Claude » activé · toucher pour couper"
-                    else "« Hey Claude » coupé · toucher pour activer",
+                    if (heyClaude) "« Hey Claude » activé · réglages ⚙"
+                    else "« Hey Claude » coupé · réglages ⚙",
                     color = Blanc.copy(alpha = 0.55f),
                     fontSize = 13.sp,
-                    modifier = Modifier.clickable { basculerHeyClaude() }
+                    modifier = Modifier.clickable { ouvrirReglages() }
                 )
             }
             Row(
@@ -767,6 +777,11 @@ class MainActivity : ComponentActivity() {
                 Spacer(Modifier.width(8.dp))
                 Text(m.libelle, color = Blanc, fontSize = 13.sp, fontWeight = FontWeight.Medium)
             }
+            Spacer(Modifier.width(6.dp))
+            Text(
+                "⚙", color = Blanc.copy(alpha = 0.8f), fontSize = 22.sp,
+                modifier = Modifier.clip(CircleShape).clickable { ouvrirReglages() }.padding(6.dp)
+            )
         }
     }
 
@@ -1098,6 +1113,196 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun ouvrirReglages() {
+        if (carteEnAttente) return
+        reconnaissance.cancel()
+        tts.stop()
+        ecouteSuite = false
+        ecouteConfirmation = false
+        ecoute = false
+        voixDispo = Reglages.voixFrancaises(tts)
+        reglagesOuverts = true
+    }
+
+    private fun fermerReglages() {
+        reglagesOuverts = false
+        Reglages.appliquerVoix(this, tts)
+        derniereActivite = System.currentTimeMillis()
+    }
+
+    /** Écran « Réglages » : voix, comportement et annonces. Rien de lié à la sécurité. */
+    @Composable
+    private fun EcranReglages() {
+        androidx.activity.compose.BackHandler { fermerReglages() }
+        val c = this
+        var volume by remember { mutableFloatStateOf(Reglages.volume(c)) }
+        var vitesse by remember { mutableFloatStateOf(Reglages.vitesse(c)) }
+        var hauteur by remember { mutableFloatStateOf(Reglages.hauteur(c)) }
+        var voix by remember { mutableStateOf(Reglages.voix(c)) }
+        var fermeture by remember { mutableIntStateOf(Reglages.fermetureSecondes(c)) }
+        var suite by remember { mutableStateOf(Reglages.conversationContinue(c)) }
+        var delaiSms by remember { mutableIntStateOf(Reglages.delaiSmsSecondes(c)) }
+        var mails by remember { mutableStateOf(Reglages.annonceMails(c)) }
+        var calme by remember { mutableStateOf(Reglages.heuresCalmes(c)) }
+        var debut by remember { mutableIntStateOf(Reglages.calmeDebut(c)) }
+        var fin by remember { mutableIntStateOf(Reglages.calmeFin(c)) }
+
+        Box(Modifier.fillMaxSize().background(Color(0xFF160F17))) {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .safeDrawingPadding()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 24.dp, vertical = 16.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "‹", color = Blanc, fontSize = 32.sp,
+                        modifier = Modifier.clip(CircleShape).clickable { fermerReglages() }
+                            .padding(horizontal = 12.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text("Réglages", color = Blanc, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                }
+
+                RSection("Voix")
+                RCurseur("Volume", "${(volume * 100).roundToInt()} %", volume, 0.1f..1f, 17) {
+                    volume = it; Reglages.ecrire(c, "volume_voix", it)
+                }
+                RCurseur("Vitesse", "× " + "%.1f".format(vitesse), vitesse, 0.5f..2f, 14) {
+                    vitesse = it; Reglages.ecrire(c, "vitesse_voix", it)
+                }
+                RCurseur("Hauteur", "× " + "%.1f".format(hauteur), hauteur, 0.5f..2f, 14) {
+                    hauteur = it; Reglages.ecrire(c, "hauteur_voix", it)
+                }
+                Text("Voix", color = Blanc, fontSize = 15.sp, modifier = Modifier.padding(top = 12.dp, bottom = 6.dp))
+                val choixVoix = listOf("" to "Par défaut") +
+                    voixDispo.mapIndexed { i, v ->
+                        v.name to "Voix ${i + 1} · " + v.name.removePrefix("fr-fr-x-").removePrefix("fr-FR-").removeSuffix("-local")
+                    }
+                choixVoix.forEach { (nom, libelle) ->
+                    val choisi = nom == voix
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (choisi) Color.White.copy(alpha = 0.12f) else Color.Transparent)
+                            .clickable { voix = nom; Reglages.ecrire(c, "voix", nom) }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(if (choisi) "●" else "○", color = Blanc, fontSize = 14.sp)
+                        Spacer(Modifier.width(10.dp))
+                        Text(libelle, color = Blanc, fontSize = 14.sp)
+                    }
+                }
+                if (voixDispo.isEmpty()) {
+                    Text(
+                        "Aucune autre voix française installée (Paramètres › Synthèse vocale pour en ajouter).",
+                        color = Blanc.copy(alpha = 0.5f), fontSize = 12.sp
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                Button(onClick = {
+                    Reglages.appliquerVoix(c, tts)
+                    parler("Bonjour Nicolas, voici ma voix avec ces réglages.")
+                }) { Text("Tester la voix") }
+
+                RSection("Comportement")
+                RInterrupteur("« Hey Claude »", "Écoute du mot d'appel quand l'appli est fermée", heyClaude) {
+                    basculerHeyClaude()
+                }
+                RChoix("Fermeture automatique", listOf(5, 10, 20, 30), fermeture, " s") {
+                    fermeture = it; Reglages.ecrire(c, "fermeture_s", it)
+                }
+                RInterrupteur("Conversation continue", "Réécoute après chaque réponse", suite) {
+                    suite = it; Reglages.ecrire(c, "conversation_continue", it)
+                }
+                RChoix("Délai avant l'envoi d'un SMS", listOf(3, 5, 10), delaiSms, " s") {
+                    delaiSms = it; Reglages.ecrire(c, "delai_sms_s", it)
+                }
+
+                RSection("Annonces")
+                RInterrupteur("Annonce vocale des mails", "Expéditeur et sujet des nouveaux mails Gmail", mails) {
+                    mails = it; Reglages.ecrire(c, "annonce_mails", it)
+                }
+                RInterrupteur(
+                    "Heures calmes",
+                    "Ni mails ni rappels lus à voix haute (les notifications restent)", calme
+                ) { calme = it; Reglages.ecrire(c, "heures_calmes", it) }
+                if (calme) {
+                    RChoix("Début", listOf(20, 21, 22, 23), debut, " h") {
+                        debut = it; Reglages.ecrire(c, "calme_debut", it)
+                    }
+                    RChoix("Fin", listOf(6, 7, 8, 9), fin, " h") {
+                        fin = it; Reglages.ecrire(c, "calme_fin", it)
+                    }
+                }
+
+                Spacer(Modifier.height(24.dp))
+                Text(
+                    "Les confirmations et les règles de sécurité ne sont pas réglables.",
+                    color = Blanc.copy(alpha = 0.45f), fontSize = 12.sp
+                )
+                Spacer(Modifier.height(24.dp))
+            }
+        }
+    }
+
+    @Composable
+    private fun RSection(titre: String) {
+        Text(
+            titre.uppercase(), color = Color(0xFFD97757), fontSize = 13.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(top = 26.dp, bottom = 8.dp)
+        )
+    }
+
+    @Composable
+    private fun RCurseur(
+        titre: String, valeurTexte: String, valeur: Float,
+        bornes: ClosedFloatingPointRange<Float>, pas: Int, change: (Float) -> Unit
+    ) {
+        Row(Modifier.fillMaxWidth()) {
+            Text(titre, color = Blanc, fontSize = 15.sp, modifier = Modifier.weight(1f))
+            Text(valeurTexte, color = Blanc.copy(alpha = 0.7f), fontSize = 15.sp)
+        }
+        Slider(value = valeur, onValueChange = change, valueRange = bornes, steps = pas)
+    }
+
+    @Composable
+    private fun RInterrupteur(titre: String, detail: String, actif: Boolean, change: (Boolean) -> Unit) {
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(titre, color = Blanc, fontSize = 15.sp)
+                Text(detail, color = Blanc.copy(alpha = 0.5f), fontSize = 12.sp)
+            }
+            Switch(checked = actif, onCheckedChange = change)
+        }
+    }
+
+    @Composable
+    private fun RChoix(titre: String, valeurs: List<Int>, actuelle: Int, unite: String, change: (Int) -> Unit) {
+        Text(titre, color = Blanc, fontSize = 15.sp, modifier = Modifier.padding(top = 10.dp, bottom = 6.dp))
+        Row {
+            valeurs.forEach { v ->
+                val choisi = v == actuelle
+                Text(
+                    "$v$unite",
+                    color = Blanc, fontSize = 14.sp,
+                    modifier = Modifier
+                        .padding(end = 8.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(if (choisi) Color(0xFFD97757) else Color.White.copy(alpha = 0.08f))
+                        .clickable { change(v) }
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                )
+            }
+        }
+    }
+
     private fun basculerHeyClaude() {
         heyClaude = !heyClaude
         Reglages.setHeyClaude(this, heyClaude)
@@ -1121,7 +1326,7 @@ class MainActivity : ComponentActivity() {
             while (true) {
                 delay(1_000)
                 val occupe = ecoute || traitementEnCours || carteEnAttente || envoiMailEnCours ||
-                    horsAppli || tts.isSpeaking
+                    horsAppli || reglagesOuverts || tts.isSpeaking
                 if (occupe) {
                     derniereActivite = System.currentTimeMillis()
                     continue
