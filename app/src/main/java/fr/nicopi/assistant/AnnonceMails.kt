@@ -50,7 +50,7 @@ class AnnonceMails : NotificationListenerService() {
             if (sujet.contains("NicoPi", true)) "NicoPi" else "toi-même"
         } else titre
         if (pret) {
-            tts?.speak("Nouveau mail de $de. $sujet", TextToSpeech.QUEUE_ADD, null, sbn.key)
+            tts?.speak("Nouveau mail de $de. $sujet", TextToSpeech.QUEUE_ADD, Reglages.parametresVoix(), sbn.key)
         }
     }
 

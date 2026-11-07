@@ -129,7 +129,7 @@ class RappelRecu : BroadcastReceiver() {
                 @Deprecated("Deprecated in Java")
                 override fun onError(utteranceId: String?) { main.post { terminer() } }
             })
-            moteur.speak("Rappel : $texte", TextToSpeech.QUEUE_FLUSH, null, "rappel")
+            moteur.speak("Rappel : $texte", TextToSpeech.QUEUE_FLUSH, Reglages.parametresVoix(), "rappel")
         }
         // Sécurité : un récepteur ne doit pas durer plus de quelques secondes
         main.postDelayed({ terminer() }, 9_000)

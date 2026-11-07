@@ -602,7 +602,7 @@ class MainActivity : ComponentActivity() {
         reflexion = false
         derniereActivite = System.currentTimeMillis()
         statut = texte
-        tts.speak(texte, TextToSpeech.QUEUE_FLUSH, null, id)
+        tts.speak(texte, TextToSpeech.QUEUE_FLUSH, Reglages.parametresVoix(), id)
     }
 
     private fun envoyerSmsEnAttente() {
